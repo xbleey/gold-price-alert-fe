@@ -159,12 +159,17 @@
         <el-tab-pane label="告警历史" name="alerts">
           <el-card class="section-card">
             <p class="section-title">告警查询</p>
-            <div class="inline-actions">
-              <el-select v-model="alertState.query.alertLevel" placeholder="全部等级" clearable>
-                <el-option v-for="level in alertLevels" :key="level" :label="level" :value="level" />
-              </el-select>
-              <el-button :loading="alertState.loading" @click="handleFetchAlerts">
-                查询告警
+            <div class="inline-actions alert-filter-actions">
+              <el-button
+                v-for="level in alertLevels"
+                :key="level"
+                size="small"
+                :type="isAlertLevelSelected(level) ? 'primary' : 'default'"
+                :plain="!isAlertLevelSelected(level)"
+                :disabled="alertState.loading"
+                @click="toggleAlertLevel(level)"
+              >
+                {{ level }}
               </el-button>
             </div>
             <el-divider />
@@ -229,6 +234,7 @@ import {
 
 const activeTab = ref('price');
 const alertLevels = ['INFO_LEVEL', 'MINOR_LEVEL', 'MODERATE_LEVEL', 'MAJOR_LEVEL', 'CRITICAL_LEVEL'];
+const defaultAlertLevels = ['MAJOR_LEVEL', 'CRITICAL_LEVEL'];
 
 const klineRanges = [
   { label: '最近6小时', value: '6h', minutes: 360, bucketMinutes: 15, length: 2000 },
@@ -268,7 +274,7 @@ const alertState = reactive({
   query: {
     pageNum: 1,
     pageSize: 20,
-    alertLevel: '',
+    alertLevels: [...defaultAlertLevels],
   },
   records: [],
   total: 0,
@@ -546,6 +552,12 @@ const handleClearThreshold = async () => {
 const handleFetchAlerts = async ({ silent = false } = {}) => {
   alertState.loading = true;
   try {
+    const selectedLevels = alertState.query.alertLevels || [];
+    if (!selectedLevels.length) {
+      alertState.records = [];
+      alertState.total = 0;
+      return;
+    }
     const { data } = await fetchAlertList(alertState.query);
     alertState.records = data.records || [];
     alertState.total = Number(data.total || 0);
@@ -556,6 +568,19 @@ const handleFetchAlerts = async ({ silent = false } = {}) => {
   } finally {
     alertState.loading = false;
   }
+};
+
+const isAlertLevelSelected = (level) => alertState.query.alertLevels.includes(level);
+
+const toggleAlertLevel = (level) => {
+  const selected = alertState.query.alertLevels;
+  const nextSelected = selected.includes(level)
+    ? selected.filter((item) => item !== level)
+    : [...selected, level];
+
+  alertState.query.alertLevels = alertLevels.filter((item) => nextSelected.includes(item));
+  alertState.query.pageNum = 1;
+  handleFetchAlerts();
 };
 
 const handleAlertPageChange = (page) => {

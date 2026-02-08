@@ -150,6 +150,14 @@ body {
   color: #409eff;
 }
 
+.alert-filter-actions {
+  gap: 8px;
+}
+
+.alert-filter-actions .el-button + .el-button {
+  margin-left: 0;
+}
+
 .status-tag {
   margin-left: 8px;
 }

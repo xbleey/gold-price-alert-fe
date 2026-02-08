@@ -20,13 +20,16 @@ export const setThreshold = (value) =>
 
 export const clearThreshold = () => apiClient.delete('/threshold');
 
-export const fetchAlertList = ({ pageNum, pageSize, alertLevel }) =>
-  apiClient.get('/alert/list', {
-    params: {
-      pageNum,
-      pageSize,
-      alertLevel: alertLevel || undefined,
-    },
+export const fetchAlertList = ({ pageNum, pageSize, alertLevels }) => {
+  const params = new URLSearchParams();
+  params.append('pageNum', String(pageNum));
+  params.append('pageSize', String(pageSize));
+  (alertLevels || []).forEach((level) => params.append('alertLevel', level));
+
+  return apiClient.get('/alert/list', {
+    params,
+    paramsSerializer: (value) => value.toString(),
   });
+};
 
 export const sendTestEmail = () => apiClient.post('/test/email');

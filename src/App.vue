@@ -2,29 +2,98 @@
   <div class="app-shell">
     <header class="app-header">
       <h1>金价告警控制台</h1>
-      <p>用于可视化查询与操作后端接口，支持开发与生产环境切换。</p>
+      <p>首页展示 K 线趋势，支持最近 6 小时到 15 分钟的快速切换。</p>
     </header>
     <main class="app-content">
-      <el-tabs v-model="activeTab" type="border-card">
-        <el-tab-pane label="接口概览" name="overview">
-          <el-card class="section-card">
-            <p class="section-title">当前接口配置</p>
-            <el-descriptions :column="1" border>
-              <el-descriptions-item label="API Base">{{ apiBase }}</el-descriptions-item>
-              <el-descriptions-item label="站点 Base">{{ siteBase }}</el-descriptions-item>
-            </el-descriptions>
-          </el-card>
-          <el-card class="section-card">
-            <p class="section-title">接口清单</p>
-            <el-table :data="endpointRows" style="width: 100%">
-              <el-table-column prop="name" label="用途" min-width="160" />
-              <el-table-column prop="method" label="方法" width="100" />
-              <el-table-column prop="path" label="路径" min-width="200" />
-              <el-table-column prop="description" label="说明" min-width="260" />
-            </el-table>
-          </el-card>
-        </el-tab-pane>
+      <el-card class="section-card kline-card">
+        <div class="section-head">
+          <p class="section-title">金价 K 线趋势</p>
+          <div class="inline-actions">
+            <el-radio-group
+              v-model="klineState.range"
+              class="kline-range-group"
+              @change="handleRangeChange"
+            >
+              <el-radio-button v-for="item in klineRanges" :key="item.value" :label="item.value">
+                {{ item.label }}
+              </el-radio-button>
+            </el-radio-group>
+            <el-button type="primary" :loading="klineState.loading" @click="handleFetchKline">
+              刷新 K 线
+            </el-button>
+          </div>
+        </div>
+        <div class="kline-summary">
+          <span>最新价：{{ klineState.latestPrice }}</span>
+          <span>币种：{{ klineState.latestSymbol }}</span>
+          <span>最新时间：{{ klineState.latestTime }}</span>
+          <span>样本数：{{ klineState.windowData.length }}</span>
+        </div>
+        <div class="chart-wrapper">
+          <svg
+            v-if="chartModel"
+            class="kline-svg"
+            :viewBox="`0 0 ${chartModel.width} ${chartModel.height}`"
+            preserveAspectRatio="xMidYMid meet"
+          >
+            <g>
+              <line
+                v-for="line in chartModel.gridLines"
+                :key="line.y"
+                class="chart-grid-line"
+                :x1="chartModel.padding.left"
+                :y1="line.y"
+                :x2="chartModel.width - chartModel.padding.right"
+                :y2="line.y"
+              />
+              <text
+                v-for="line in chartModel.gridLines"
+                :key="`label-${line.y}`"
+                class="chart-y-label"
+                :x="chartModel.padding.left - 8"
+                :y="line.y + 4"
+              >
+                {{ line.label }}
+              </text>
+            </g>
+            <g>
+              <line
+                v-for="bar in chartModel.bars"
+                :key="`wick-${bar.time}`"
+                class="chart-wick"
+                :x1="bar.x"
+                :y1="bar.wickTop"
+                :x2="bar.x"
+                :y2="bar.wickBottom"
+              />
+              <rect
+                v-for="bar in chartModel.bars"
+                :key="`body-${bar.time}`"
+                class="chart-body"
+                :x="bar.bodyX"
+                :y="bar.bodyY"
+                :width="bar.bodyWidth"
+                :height="bar.bodyHeight"
+                :fill="bar.color"
+              />
+            </g>
+            <g>
+              <text
+                v-for="label in chartModel.xLabels"
+                :key="label.time"
+                class="chart-x-label"
+                :x="label.x"
+                :y="chartModel.height - 10"
+              >
+                {{ label.label }}
+              </text>
+            </g>
+          </svg>
+          <el-empty v-else description="当前时间窗口暂无可用历史数据" />
+        </div>
+      </el-card>
 
+      <el-tabs v-model="activeTab" type="border-card">
         <el-tab-pane label="价格快照" name="price">
           <el-card class="section-card">
             <p class="section-title">最新价格抓取</p>
@@ -37,40 +106,24 @@
               </span>
             </div>
             <el-divider />
-            <el-descriptions :column="2" border>
+            <el-descriptions :column="1" border>
               <el-descriptions-item label="抓取时间">
                 {{ priceState.result?.fetchedAt || '-' }}
               </el-descriptions-item>
               <el-descriptions-item label="价格">
-                {{ priceState.result?.price || '-' }}
+                {{ formatPrice(priceState.result?.price) }}
               </el-descriptions-item>
               <el-descriptions-item label="币种">
                 {{ priceState.result?.symbol || '-' }}
               </el-descriptions-item>
             </el-descriptions>
           </el-card>
-
-          <el-card class="section-card">
-            <p class="section-title">历史快照</p>
-            <div class="inline-actions">
-              <el-input-number v-model="historyState.length" :min="1" :max="500" />
-              <el-button :loading="historyState.loading" @click="handleFetchHistory">
-                查询历史
-              </el-button>
-            </div>
-            <el-divider />
-            <el-table :data="historyState.data" style="width: 100%">
-              <el-table-column prop="fetchedAt" label="抓取时间" min-width="200" />
-              <el-table-column prop="price" label="价格" min-width="120" />
-              <el-table-column prop="symbol" label="币种" min-width="120" />
-              <el-table-column prop="updatedAtReadable" label="更新时间" min-width="200" />
-            </el-table>
-          </el-card>
         </el-tab-pane>
 
         <el-tab-pane label="阈值配置" name="threshold">
           <el-card class="section-card">
             <p class="section-title">当前阈值</p>
+            <p class="threshold-value">{{ thresholdState.info?.threshold || '-' }}</p>
             <div class="inline-actions">
               <el-button :loading="thresholdState.loading" @click="handleGetThreshold">
                 刷新阈值
@@ -83,12 +136,6 @@
                 {{ thresholdState.info.status }}
               </el-tag>
             </div>
-            <el-divider />
-            <el-descriptions :column="1" border>
-              <el-descriptions-item label="阈值">
-                {{ thresholdState.info?.threshold || '-' }}
-              </el-descriptions-item>
-            </el-descriptions>
           </el-card>
 
           <el-card class="section-card">
@@ -127,8 +174,16 @@
               <el-table-column prop="alertTimeUtc" label="告警时间(UTC)" min-width="200" />
               <el-table-column prop="thresholdPercent" label="阈值%" width="120" />
               <el-table-column prop="changePercent" label="涨跌幅%" width="120" />
-              <el-table-column prop="baselinePrice" label="基准价" width="120" />
-              <el-table-column prop="latestPrice" label="最新价" width="120" />
+              <el-table-column prop="baselinePrice" label="基准价" width="120">
+                <template #default="{ row }">
+                  {{ formatPrice(row.baselinePrice) }}
+                </template>
+              </el-table-column>
+              <el-table-column prop="latestPrice" label="最新价" width="120">
+                <template #default="{ row }">
+                  {{ formatPrice(row.latestPrice) }}
+                </template>
+              </el-table-column>
             </el-table>
             <el-divider />
             <el-pagination
@@ -140,38 +195,6 @@
               @current-change="handleAlertPageChange"
               @size-change="handleAlertSizeChange"
             />
-          </el-card>
-        </el-tab-pane>
-
-        <el-tab-pane label="健康检查" name="health">
-          <el-card class="section-card">
-            <p class="section-title">健康探针</p>
-            <div class="inline-actions">
-              <el-button type="primary" :loading="healthState.loading" @click="handleHealthCheck">
-                立即检查
-              </el-button>
-            </div>
-            <el-divider />
-            <el-row :gutter="16">
-              <el-col :span="8">
-                <el-card>
-                  <p class="section-title">存活探针 /health/live</p>
-                  <pre class="json-block">{{ formatJson(healthState.live) }}</pre>
-                </el-card>
-              </el-col>
-              <el-col :span="8">
-                <el-card>
-                  <p class="section-title">就绪探针 /health/ready</p>
-                  <pre class="json-block">{{ formatJson(healthState.ready) }}</pre>
-                </el-card>
-              </el-col>
-              <el-col :span="8">
-                <el-card>
-                  <p class="section-title">综合探针 /health</p>
-                  <pre class="json-block">{{ formatJson(healthState.overall) }}</pre>
-                </el-card>
-              </el-col>
-            </el-row>
           </el-card>
         </el-tab-pane>
 
@@ -192,14 +215,11 @@
 </template>
 
 <script setup>
-import { reactive, ref } from 'vue';
+import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue';
 import { ElMessage } from 'element-plus';
 import {
   clearThreshold,
   fetchAlertList,
-  fetchHealth,
-  fetchHealthLive,
-  fetchHealthReady,
   fetchHistory,
   fetchPrice,
   getThreshold,
@@ -207,84 +227,32 @@ import {
   setThreshold,
 } from './api';
 
-const activeTab = ref('overview');
-const apiBase = import.meta.env.VITE_API_BASE || '/gold-price-alert/api';
-const siteBase = import.meta.env.VITE_BASE_PATH || '/';
-
-const endpointRows = [
-  {
-    name: '拉取最新价格',
-    method: 'GET',
-    path: '/price',
-    description: '手动触发价格抓取并返回结果',
-  },
-  {
-    name: '查询历史快照',
-    method: 'GET',
-    path: '/history?length=100',
-    description: '返回最近 N 条金价快照',
-  },
-  {
-    name: '获取阈值',
-    method: 'GET',
-    path: '/threshold',
-    description: '查看当前阈值配置',
-  },
-  {
-    name: '设置阈值',
-    method: 'POST',
-    path: '/threshold?value=0.35',
-    description: '写入阈值配置',
-  },
-  {
-    name: '清空阈值',
-    method: 'DELETE',
-    path: '/threshold',
-    description: '删除阈值配置',
-  },
-  {
-    name: '告警历史',
-    method: 'GET',
-    path: '/alert/list?pageNum=1&pageSize=20',
-    description: '分页查询告警历史，可按等级过滤',
-  },
-  {
-    name: '存活探针',
-    method: 'GET',
-    path: '/health/live',
-    description: '检查服务进程是否存活',
-  },
-  {
-    name: '就绪探针',
-    method: 'GET',
-    path: '/health/ready',
-    description: '检查数据库和 Redis 连接',
-  },
-  {
-    name: '综合探针',
-    method: 'GET',
-    path: '/health',
-    description: '通用健康检查入口',
-  },
-  {
-    name: '测试邮件',
-    method: 'POST',
-    path: '/test/email',
-    description: '触发后端测试邮件发送',
-  },
-];
-
+const activeTab = ref('price');
 const alertLevels = ['INFO_LEVEL', 'MINOR_LEVEL', 'MODERATE_LEVEL', 'MAJOR_LEVEL', 'CRITICAL_LEVEL'];
+
+const klineRanges = [
+  { label: '最近6小时', value: '6h', minutes: 360, bucketMinutes: 15, length: 2000 },
+  { label: '最近2小时', value: '2h', minutes: 120, bucketMinutes: 5, length: 1000 },
+  { label: '最近1小时', value: '1h', minutes: 60, bucketMinutes: 2, length: 700 },
+  { label: '最近30分钟', value: '30m', minutes: 30, bucketMinutes: 1, length: 400 },
+  { label: '最近15分钟', value: '15m', minutes: 15, bucketMinutes: 1, length: 250 },
+];
+const klineRangeMap = Object.fromEntries(klineRanges.map((item) => [item.value, item]));
+
+const klineState = reactive({
+  loading: false,
+  range: '2h',
+  rawData: [],
+  windowData: [],
+  candles: [],
+  latestPrice: '-',
+  latestSymbol: '-',
+  latestTime: '-',
+});
 
 const priceState = reactive({
   loading: false,
   result: null,
-});
-
-const historyState = reactive({
-  loading: false,
-  length: 100,
-  data: [],
 });
 
 const thresholdState = reactive({
@@ -306,24 +274,201 @@ const alertState = reactive({
   total: 0,
 });
 
-const healthState = reactive({
-  loading: false,
-  live: null,
-  ready: null,
-  overall: null,
-});
-
 const emailState = reactive({
   loading: false,
   message: '',
 });
 
-const handleFetchPrice = async () => {
+const isPhoneViewport = ref(false);
+
+const chartModel = computed(() => {
+  if (!klineState.candles.length) {
+    return null;
+  }
+  const width = isPhoneViewport.value ? 860 : 1100;
+  const height = isPhoneViewport.value ? 520 : 430;
+  const padding = isPhoneViewport.value
+    ? { top: 20, right: 18, bottom: 36, left: 58 }
+    : { top: 24, right: 24, bottom: 42, left: 66 };
+  const innerWidth = width - padding.left - padding.right;
+  const innerHeight = height - padding.top - padding.bottom;
+  const maxPrice = Math.max(...klineState.candles.map((item) => item.high));
+  const minPrice = Math.min(...klineState.candles.map((item) => item.low));
+  const priceSpan = Math.max(maxPrice - minPrice, maxPrice * 0.002, 0.01);
+  const slotWidth = innerWidth / Math.max(klineState.candles.length, 1);
+  const bodyWidth = Math.max(5, Math.min(slotWidth * 0.56, 18));
+
+  const toY = (price) => padding.top + ((maxPrice - price) / priceSpan) * innerHeight;
+  const bars = klineState.candles.map((item, index) => {
+    const x = padding.left + slotWidth * index + slotWidth / 2;
+    const upper = Math.max(item.open, item.close);
+    const lower = Math.min(item.open, item.close);
+    const top = toY(upper);
+    const bottom = toY(lower);
+    return {
+      time: item.time,
+      x,
+      wickTop: toY(item.high),
+      wickBottom: toY(item.low),
+      bodyX: x - bodyWidth / 2,
+      bodyY: top,
+      bodyWidth,
+      bodyHeight: Math.max(bottom - top, 1),
+      color: item.close >= item.open ? '#22c55e' : '#ef4444',
+    };
+  });
+
+  const gridLines = Array.from({ length: 5 }, (_, index) => {
+    const ratio = index / 4;
+    const value = maxPrice - priceSpan * ratio;
+    return {
+      y: padding.top + innerHeight * ratio,
+      label: formatPrice(value),
+    };
+  });
+
+  const labelStep = Math.max(1, Math.ceil(klineState.candles.length / 6));
+  const xLabels = bars
+    .map((bar, index) => {
+      if (index !== klineState.candles.length - 1 && index % labelStep !== 0) {
+        return null;
+      }
+      return {
+        time: bar.time,
+        x: bar.x,
+        label: formatTime(bar.time),
+      };
+    })
+    .filter(Boolean);
+
+  return {
+    width,
+    height,
+    padding,
+    bars,
+    gridLines,
+    xLabels,
+  };
+});
+
+const getRangeConfig = () => klineRangeMap[klineState.range] || klineRanges[1];
+
+const normalizeHistory = (rows) =>
+  (rows || [])
+    .map((item) => {
+      const timestamp = Date.parse(item.fetchedAt);
+      const price = Number(item.price);
+      if (!Number.isFinite(timestamp) || !Number.isFinite(price)) {
+        return null;
+      }
+      return {
+        timestamp,
+        price,
+        symbol: item.symbol || '-',
+      };
+    })
+    .filter(Boolean)
+    .sort((a, b) => a.timestamp - b.timestamp);
+
+const buildCandles = (points, startMs, bucketMinutes) => {
+  if (!points.length) {
+    return [];
+  }
+  const bucketMs = bucketMinutes * 60 * 1000;
+  const groups = new Map();
+
+  points.forEach((point) => {
+    const offset = Math.floor((point.timestamp - startMs) / bucketMs);
+    if (offset < 0) {
+      return;
+    }
+    if (!groups.has(offset)) {
+      groups.set(offset, []);
+    }
+    groups.get(offset).push(point);
+  });
+
+  const offsets = [...groups.keys()].sort((a, b) => a - b);
+  if (!offsets.length) {
+    return [];
+  }
+
+  const firstOffset = offsets[0];
+  const lastOffset = offsets[offsets.length - 1];
+  const candles = [];
+  let previousClose = null;
+
+  for (let offset = firstOffset; offset <= lastOffset; offset += 1) {
+    const group = groups.get(offset);
+    if (group && group.length) {
+      const sorted = group.sort((a, b) => a.timestamp - b.timestamp);
+      const prices = sorted.map((item) => item.price);
+      const candle = {
+        time: startMs + offset * bucketMs,
+        open: prices[0],
+        close: prices[prices.length - 1],
+        high: Math.max(...prices),
+        low: Math.min(...prices),
+      };
+      candles.push(candle);
+      previousClose = candle.close;
+      continue;
+    }
+
+    if (previousClose == null) {
+      continue;
+    }
+
+    candles.push({
+      time: startMs + offset * bucketMs,
+      open: previousClose,
+      close: previousClose,
+      high: previousClose,
+      low: previousClose,
+    });
+  }
+
+  return candles;
+};
+
+const applyKlineWindow = () => {
+  if (!klineState.rawData.length) {
+    klineState.windowData = [];
+    klineState.candles = [];
+    klineState.latestPrice = '-';
+    klineState.latestSymbol = '-';
+    klineState.latestTime = '-';
+    return;
+  }
+
+  const config = getRangeConfig();
+  const latestTimestamp = klineState.rawData[klineState.rawData.length - 1].timestamp;
+  const windowStart = latestTimestamp - config.minutes * 60 * 1000;
+  const windowData = klineState.rawData.filter((point) => point.timestamp >= windowStart);
+
+  klineState.windowData = windowData;
+  klineState.candles = buildCandles(windowData, windowStart, config.bucketMinutes);
+
+  const latest = windowData[windowData.length - 1];
+  if (latest) {
+    klineState.latestPrice = formatPrice(latest.price);
+    klineState.latestSymbol = latest.symbol;
+    klineState.latestTime = formatDateTime(latest.timestamp);
+  } else {
+    klineState.latestPrice = '-';
+    klineState.latestSymbol = '-';
+    klineState.latestTime = '-';
+  }
+};
+
+const handleFetchPrice = async ({ silent = false } = {}) => {
   priceState.loading = true;
   try {
     const { data } = await fetchPrice();
     priceState.result = data;
-    ElMessage.success('价格已更新');
+    if (!silent) {
+      ElMessage.success('价格已更新');
+    }
   } catch (error) {
     ElMessage.error(`抓取失败：${resolveError(error)}`);
   } finally {
@@ -331,26 +476,37 @@ const handleFetchPrice = async () => {
   }
 };
 
-const handleFetchHistory = async () => {
-  historyState.loading = true;
+const handleFetchKline = async ({ silent = false } = {}) => {
+  klineState.loading = true;
   try {
-    const { data } = await fetchHistory(historyState.length);
-    historyState.data = data || [];
-    ElMessage.success('历史数据已加载');
+    const config = getRangeConfig();
+    const { data } = await fetchHistory(config.length);
+    klineState.rawData = normalizeHistory(data);
+    applyKlineWindow();
+    if (!silent) {
+      ElMessage.success('K 线数据已更新');
+    }
   } catch (error) {
     ElMessage.error(`加载失败：${resolveError(error)}`);
   } finally {
-    historyState.loading = false;
+    klineState.loading = false;
   }
 };
 
-const handleGetThreshold = async () => {
+const handleRangeChange = () => {
+  applyKlineWindow();
+  void handleFetchKline({ silent: true });
+};
+
+const handleGetThreshold = async ({ silent = false } = {}) => {
   thresholdState.loading = true;
   try {
     const { data } = await getThreshold();
     thresholdState.info = data;
   } catch (error) {
-    ElMessage.error(`读取失败：${resolveError(error)}`);
+    if (!silent) {
+      ElMessage.error(`读取失败：${resolveError(error)}`);
+    }
   } finally {
     thresholdState.loading = false;
   }
@@ -387,14 +543,16 @@ const handleClearThreshold = async () => {
   }
 };
 
-const handleFetchAlerts = async () => {
+const handleFetchAlerts = async ({ silent = false } = {}) => {
   alertState.loading = true;
   try {
     const { data } = await fetchAlertList(alertState.query);
     alertState.records = data.records || [];
     alertState.total = Number(data.total || 0);
   } catch (error) {
-    ElMessage.error(`查询失败：${resolveError(error)}`);
+    if (!silent) {
+      ElMessage.error(`查询失败：${resolveError(error)}`);
+    }
   } finally {
     alertState.loading = false;
   }
@@ -409,25 +567,6 @@ const handleAlertSizeChange = (size) => {
   alertState.query.pageSize = size;
   alertState.query.pageNum = 1;
   handleFetchAlerts();
-};
-
-const handleHealthCheck = async () => {
-  healthState.loading = true;
-  try {
-    const [live, ready, overall] = await Promise.all([
-      fetchHealthLive(),
-      fetchHealthReady(),
-      fetchHealth(),
-    ]);
-    healthState.live = live.data;
-    healthState.ready = ready.data;
-    healthState.overall = overall.data;
-    ElMessage.success('健康检查完成');
-  } catch (error) {
-    ElMessage.error(`检查失败：${resolveError(error)}`);
-  } finally {
-    healthState.loading = false;
-  }
 };
 
 const handleSendEmail = async () => {
@@ -456,10 +595,52 @@ const resolveError = (error) => {
   return error.message || String(error);
 };
 
-const formatJson = (value) => {
-  if (!value) {
-    return '暂无数据';
-  }
-  return JSON.stringify(value, null, 2);
+const formatTime = (timestamp) => {
+  const date = new Date(timestamp);
+  return `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
 };
+
+const formatDateTime = (timestamp) => {
+  const date = new Date(timestamp);
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const d = String(date.getDate()).padStart(2, '0');
+  const hh = String(date.getHours()).padStart(2, '0');
+  const mm = String(date.getMinutes()).padStart(2, '0');
+  const ss = String(date.getSeconds()).padStart(2, '0');
+  return `${y}-${m}-${d} ${hh}:${mm}:${ss}`;
+};
+
+const formatPrice = (value) => {
+  const price = Number(value);
+  if (!Number.isFinite(price)) {
+    return '-';
+  }
+  return price.toFixed(2);
+};
+
+const updateViewportFlag = () => {
+  if (typeof window === 'undefined') {
+    return;
+  }
+  isPhoneViewport.value = window.innerWidth <= 430;
+};
+
+onMounted(() => {
+  updateViewportFlag();
+  window.addEventListener('resize', updateViewportFlag);
+  Promise.allSettled([
+    handleFetchPrice({ silent: true }),
+    handleFetchKline({ silent: true }),
+    handleGetThreshold({ silent: true }),
+    handleFetchAlerts({ silent: true }),
+  ]);
+});
+
+onBeforeUnmount(() => {
+  if (typeof window === 'undefined') {
+    return;
+  }
+  window.removeEventListener('resize', updateViewportFlag);
+});
 </script>

@@ -29,10 +29,4 @@ export const fetchAlertList = ({ pageNum, pageSize, alertLevel }) =>
     },
   });
 
-export const fetchHealth = () => apiClient.get('/health');
-
-export const fetchHealthLive = () => apiClient.get('/health/live');
-
-export const fetchHealthReady = () => apiClient.get('/health/ready');
-
 export const sendTestEmail = () => apiClient.post('/test/email');

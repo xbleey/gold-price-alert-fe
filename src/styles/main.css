@@ -43,10 +43,27 @@ body {
   margin-bottom: 24px;
 }
 
+.section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
 .section-title {
   font-size: 16px;
   font-weight: 600;
-  margin: 0 0 16px;
+  margin: 0;
+  margin-bottom: 20px;
+}
+
+.section-card > .section-title {
+  margin-bottom: 12px;
+}
+
+.section-head .section-title {
+  margin-bottom: 0;
 }
 
 .inline-actions {
@@ -54,6 +71,78 @@ body {
   align-items: center;
   gap: 12px;
   flex-wrap: wrap;
+}
+
+.kline-range-group {
+  display: flex;
+  flex-wrap: wrap;
+}
+
+.kline-range-group .el-radio-button {
+  margin: 0 8px 8px 0;
+}
+
+.kline-range-group .el-radio-button__inner {
+  border-left: 1px solid var(--el-border-color) !important;
+  border-radius: 6px !important;
+}
+
+.kline-card {
+  margin-bottom: 24px;
+}
+
+.kline-summary {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin: 14px 0 12px;
+  color: #334155;
+  font-weight: 600;
+}
+
+.chart-wrapper {
+  width: 100%;
+  background: #0b1324;
+  border-radius: 12px;
+  border: 1px solid #1e293b;
+  padding: 10px;
+  box-sizing: border-box;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.kline-svg {
+  width: 100%;
+  height: auto;
+  display: block;
+}
+
+.chart-grid-line {
+  stroke: #334155;
+  stroke-width: 1;
+}
+
+.chart-wick {
+  stroke: #cbd5e1;
+  stroke-width: 1;
+}
+
+.chart-body {
+  shape-rendering: crispEdges;
+}
+
+.chart-y-label {
+  fill: #94a3b8;
+  font-size: 12px;
+  text-anchor: end;
+}
+
+.chart-x-label {
+  fill: #94a3b8;
+  font-size: 12px;
+  text-anchor: middle;
 }
 
 .value-label {
@@ -65,12 +154,53 @@ body {
   margin-left: 8px;
 }
 
-.json-block {
-  background: #0f172a;
-  color: #e2e8f0;
-  padding: 12px;
-  border-radius: 8px;
-  font-size: 12px;
-  overflow: auto;
-  max-height: 240px;
+.threshold-value {
+  margin: 0 0 14px;
+  font-size: 28px;
+  font-weight: 700;
+  color: #0f172a;
+  line-height: 1.1;
+}
+
+@media (max-width: 900px) {
+  .app-header {
+    padding: 20px;
+  }
+
+  .app-content {
+    padding: 16px 16px 32px;
+  }
+
+  .kline-summary {
+    gap: 10px;
+    font-size: 13px;
+  }
+
+  .chart-wrapper {
+    padding: 8px;
+  }
+
+  .kline-svg {
+    height: auto;
+  }
+
+  .threshold-value {
+    font-size: 22px;
+  }
+}
+
+@media (max-width: 430px) {
+  .kline-range-group .el-radio-button {
+    margin: 0 6px 6px 0;
+  }
+
+  .kline-summary {
+    font-size: 12px;
+    gap: 8px;
+  }
+
+  .chart-y-label,
+  .chart-x-label {
+    font-size: 10px;
+  }
 }

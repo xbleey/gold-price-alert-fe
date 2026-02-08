@@ -1,0 +1,76 @@
+:root {
+  color: #1f2329;
+  background-color: #f5f7fa;
+  font-family: "Helvetica Neue", "PingFang SC", "Microsoft YaHei", Arial, sans-serif;
+}
+
+body {
+  margin: 0;
+}
+
+#app {
+  min-height: 100vh;
+}
+
+.app-shell {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.app-header {
+  background: #0f2440;
+  color: #fff;
+  padding: 24px 32px;
+}
+
+.app-header h1 {
+  margin: 0;
+  font-size: 22px;
+}
+
+.app-header p {
+  margin: 8px 0 0;
+  opacity: 0.75;
+}
+
+.app-content {
+  flex: 1;
+  padding: 24px 32px 48px;
+}
+
+.section-card {
+  margin-bottom: 24px;
+}
+
+.section-title {
+  font-size: 16px;
+  font-weight: 600;
+  margin: 0 0 16px;
+}
+
+.inline-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.value-label {
+  font-weight: 600;
+  color: #409eff;
+}
+
+.status-tag {
+  margin-left: 8px;
+}
+
+.json-block {
+  background: #0f172a;
+  color: #e2e8f0;
+  padding: 12px;
+  border-radius: 8px;
+  font-size: 12px;
+  overflow: auto;
+  max-height: 240px;
+}

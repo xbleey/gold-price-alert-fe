@@ -187,6 +187,10 @@ body {
   width: 100%;
 }
 
+.alert-level-form .el-input-number {
+  width: 100%;
+}
+
 .threshold-value {
   margin: 0 0 14px;
   font-size: 28px;

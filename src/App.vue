@@ -204,6 +204,59 @@
           </el-card>
         </el-tab-pane>
 
+        <el-tab-pane label="报警等级配置" name="alert-level-config">
+          <el-card class="section-card">
+            <div class="section-head">
+              <p class="section-title">等级列表</p>
+              <div class="inline-actions">
+                <el-button :loading="alertLevelState.loading" @click="handleFetchAlertLevels">
+                  刷新列表
+                </el-button>
+                <el-button type="primary" @click="handleOpenAlertLevelCreateDialog">
+                  新增等级
+                </el-button>
+              </div>
+            </div>
+
+            <el-table stripe v-loading="alertLevelState.loading" :data="alertLevelState.records" style="width: 100%">
+              <el-table-column prop="levelName" label="等级编码" width="120" />
+              <el-table-column prop="levelRank" label="等级序号" width="120" />
+              <el-table-column prop="thresholdPercent" label="阈值%" width="120">
+                <template #default="{ row }">
+                  {{ formatAlertThreshold(row.thresholdPercent) }}
+                </template>
+              </el-table-column>
+              <el-table-column prop="windowMinutes" label="统计窗口(分钟)" width="140" />
+              <el-table-column prop="cooldownMinutes" label="冷却时间(分钟)" width="140" />
+              <el-table-column prop="protectedLevel" label="系统内置" width="120">
+                <template #default="{ row }">
+                  <el-tag :type="row.protectedLevel ? 'warning' : 'info'">
+                    {{ row.protectedLevel ? '是' : '否' }}
+                  </el-tag>
+                </template>
+              </el-table-column>
+              <el-table-column label="操作" width="200" fixed="right">
+                <template #default="{ row }">
+                  <div class="recipient-row-actions">
+                    <el-button type="primary" link @click="handleOpenAlertLevelEditDialog(row.levelName)">
+                      编辑
+                    </el-button>
+                    <el-button
+                      type="danger"
+                      link
+                      :disabled="row.protectedLevel"
+                      @click="handleDeleteAlertLevel(row)"
+                    >
+                      删除
+                    </el-button>
+                  </div>
+                </template>
+              </el-table-column>
+            </el-table>
+            <div class="recipient-total">共 {{ alertLevelState.total }} 条</div>
+          </el-card>
+        </el-tab-pane>
+
         <el-tab-pane label="收件人管理" name="recipients">
           <el-card class="section-card">
             <div class="section-head">
@@ -296,6 +349,63 @@
           </div>
         </template>
       </el-dialog>
+
+      <el-dialog
+        v-model="alertLevelState.dialogVisible"
+        :title="alertLevelState.mode === 'create' ? '新增报警等级' : '编辑报警等级'"
+        width="460px"
+        @closed="resetAlertLevelForm"
+      >
+        <el-form
+          ref="alertLevelFormRef"
+          :model="alertLevelState.form"
+          :rules="alertLevelRules"
+          class="alert-level-form"
+          label-width="110px"
+        >
+          <el-form-item label="等级编码" prop="levelName">
+            <el-input
+              v-model="alertLevelState.form.levelName"
+              placeholder="请输入等级编码，例如 P6"
+              maxlength="16"
+              :disabled="alertLevelState.mode === 'edit'"
+              clearable
+            />
+          </el-form-item>
+          <el-form-item label="阈值百分比" prop="thresholdPercent">
+            <el-input
+              v-model="alertLevelState.form.thresholdPercent"
+              placeholder="请输入 0.00~10.00，必须两位小数，例如 0.20"
+              inputmode="decimal"
+              clearable
+            />
+          </el-form-item>
+          <el-form-item label="统计窗口(分钟)" prop="windowMinutes">
+            <el-input-number
+              v-model="alertLevelState.form.windowMinutes"
+              :min="0"
+              :step="1"
+              controls-position="right"
+            />
+          </el-form-item>
+          <el-form-item label="冷却时间(分钟)" prop="cooldownMinutes">
+            <el-input-number
+              v-model="alertLevelState.form.cooldownMinutes"
+              :min="0"
+              :step="1"
+              controls-position="right"
+            />
+          </el-form-item>
+        </el-form>
+        <template #footer>
+          <div class="inline-actions recipient-dialog-footer">
+            <el-button @click="alertLevelState.dialogVisible = false">取消</el-button>
+            <el-button type="primary" :loading="alertLevelState.submitting" @click="handleSubmitAlertLevel">
+              保存
+            </el-button>
+          </div>
+        </template>
+      </el-dialog>
     </main>
   </div>
 </template>
@@ -304,17 +414,22 @@
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import {
+  createAlertLevel,
   clearThreshold,
   createMailRecipient,
+  deleteAlertLevel,
   deleteMailRecipient,
+  fetchAlertLevels,
   fetchAlertList,
   fetchHistory,
   fetchMailRecipients,
   fetchPrice,
+  getAlertLevel,
   getMailRecipient,
   getThreshold,
   sendTestEmail,
   setThreshold,
+  updateAlertLevel,
   updateMailRecipient,
 } from './api';
 
@@ -322,6 +437,8 @@ const activeTab = ref('price');
 const alertLevels = ['INFO_LEVEL', 'MINOR_LEVEL', 'MODERATE_LEVEL', 'MAJOR_LEVEL', 'CRITICAL_LEVEL'];
 const defaultAlertLevels = ['MAJOR_LEVEL', 'CRITICAL_LEVEL'];
 const THRESHOLD_PATTERN = /^\d+\.\d{2}$/;
+const ALERT_LEVEL_NAME_PATTERN = /^P[1-9]\d*$/i;
+const ALERT_LEVEL_THRESHOLD_PATTERN = /^(?:10\.00|[0-9]\.\d{2})$/;
 
 const klineRanges = [
   { label: '最近6小时', value: '6h', minutes: 360, bucketMinutes: 15, length: 2000 },
@@ -374,6 +491,7 @@ const emailState = reactive({
 
 const EMAIL_PATTERN = /^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,63}$/;
 const recipientFormRef = ref();
+const alertLevelFormRef = ref();
 const recipientState = reactive({
   loading: false,
   submitting: false,
@@ -385,6 +503,21 @@ const recipientState = reactive({
     id: null,
     email: '',
     enabled: true,
+  },
+});
+
+const alertLevelState = reactive({
+  loading: false,
+  submitting: false,
+  dialogVisible: false,
+  mode: 'create',
+  records: [],
+  total: 0,
+  form: {
+    levelName: '',
+    thresholdPercent: '',
+    windowMinutes: 0,
+    cooldownMinutes: 0,
   },
 });
 
@@ -411,6 +544,59 @@ const recipientRules = {
       trigger: 'blur',
     },
   ],
+};
+
+const validateNonNegativeInteger = (_, value, callback) => {
+  if (value === '' || value === null || value === undefined) {
+    callback(new Error('请输入非负整数'));
+    return;
+  }
+  if (!Number.isInteger(value) || value < 0) {
+    callback(new Error('请输入非负整数'));
+    return;
+  }
+  callback();
+};
+
+const alertLevelRules = {
+  levelName: [
+    { required: true, message: '请输入等级编码', trigger: 'blur' },
+    {
+      validator: (_, value, callback) => {
+        const normalized = String(value || '').trim().toUpperCase();
+        if (!normalized) {
+          callback(new Error('请输入等级编码'));
+          return;
+        }
+        if (!ALERT_LEVEL_NAME_PATTERN.test(normalized)) {
+          callback(new Error('等级编码格式错误，应为 P<number>，例如 P6'));
+          return;
+        }
+        callback();
+      },
+      trigger: 'blur',
+    },
+  ],
+  thresholdPercent: [
+    { required: true, message: '请输入阈值百分比', trigger: 'blur' },
+    {
+      validator: (_, value, callback) => {
+        const normalized = String(value || '').trim();
+        if (!normalized) {
+          callback(new Error('请输入阈值百分比'));
+          return;
+        }
+        if (!ALERT_LEVEL_THRESHOLD_PATTERN.test(normalized)) {
+          callback(new Error('请输入 0.00~10.00 且必须两位小数的值'));
+          return;
+        }
+        callback();
+      },
+      trigger: 'blur',
+    },
+  ],
+  windowMinutes: [{ validator: validateNonNegativeInteger, trigger: 'change' }],
+  cooldownMinutes: [{ validator: validateNonNegativeInteger, trigger: 'change' }],
 };
 
 const isPhoneViewport = ref(false);
@@ -730,6 +916,137 @@ const handleAlertSizeChange = (size) => {
   handleFetchAlerts();
 };
 
+const normalizeAlertLevelName = (value) => String(value || '').trim().toUpperCase();
+
+const formatAlertThreshold = (value) => {
+  const threshold = Number(value);
+  if (!Number.isFinite(threshold)) {
+    return '-';
+  }
+  return threshold.toFixed(2);
+};
+
+const normalizeAlertThresholdForSubmit = (value) => Number(String(value || '').trim()).toFixed(2);
+
+const resetAlertLevelForm = () => {
+  alertLevelState.form.levelName = '';
+  alertLevelState.form.thresholdPercent = '';
+  alertLevelState.form.windowMinutes = 0;
+  alertLevelState.form.cooldownMinutes = 0;
+  alertLevelFormRef.value?.clearValidate();
+};
+
+const handleFetchAlertLevels = async ({ silent = false } = {}) => {
+  alertLevelState.loading = true;
+  try {
+    const { data } = await fetchAlertLevels();
+    alertLevelState.records = data.records || [];
+    alertLevelState.total = Number(data.total || alertLevelState.records.length || 0);
+  } catch (error) {
+    if (!silent) {
+      ElMessage.error(`查询失败：${resolveError(error)}`);
+    }
+  } finally {
+    alertLevelState.loading = false;
+  }
+};
+
+const handleOpenAlertLevelCreateDialog = () => {
+  alertLevelState.mode = 'create';
+  alertLevelState.dialogVisible = true;
+  resetAlertLevelForm();
+};
+
+const handleOpenAlertLevelEditDialog = async (levelName) => {
+  alertLevelState.submitting = true;
+  try {
+    const { data } = await getAlertLevel(levelName);
+    const record = data.record || {};
+    alertLevelState.mode = 'edit';
+    alertLevelState.form.levelName = normalizeAlertLevelName(record.levelName || levelName);
+    alertLevelState.form.thresholdPercent = formatAlertThreshold(record.thresholdPercent);
+    alertLevelState.form.windowMinutes = Number(record.windowMinutes || 0);
+    alertLevelState.form.cooldownMinutes = Number(record.cooldownMinutes || 0);
+    alertLevelState.dialogVisible = true;
+    alertLevelFormRef.value?.clearValidate();
+  } catch (error) {
+    ElMessage.error(`读取失败：${resolveError(error)}`);
+  } finally {
+    alertLevelState.submitting = false;
+  }
+};
+
+const handleSubmitAlertLevel = async () => {
+  const formEl = alertLevelFormRef.value;
+  if (!formEl) {
+    return;
+  }
+  try {
+    await formEl.validate();
+  } catch {
+    return;
+  }
+
+  alertLevelState.submitting = true;
+  const levelName = normalizeAlertLevelName(alertLevelState.form.levelName);
+  const payload = {
+    thresholdPercent: normalizeAlertThresholdForSubmit(alertLevelState.form.thresholdPercent),
+    window: Number(alertLevelState.form.windowMinutes),
+    cooldown: Number(alertLevelState.form.cooldownMinutes),
+  };
+
+  try {
+    if (alertLevelState.mode === 'create') {
+      await createAlertLevel({
+        levelName,
+        ...payload,
+      });
+      ElMessage.success('报警等级已创建');
+    } else {
+      await updateAlertLevel(levelName, payload);
+      ElMessage.success('报警等级已更新');
+    }
+    alertLevelState.dialogVisible = false;
+    resetAlertLevelForm();
+    await handleFetchAlertLevels({ silent: true });
+  } catch (error) {
+    ElMessage.error(`保存失败：${resolveError(error)}`);
+  } finally {
+    alertLevelState.submitting = false;
+  }
+};
+
+const handleDeleteAlertLevel = async (row) => {
+  if (row.protectedLevel) {
+    ElMessage.warning('系统内置等级不允许删除');
+    return;
+  }
+  try {
+    await ElMessageBox.confirm(
+      `确认删除报警等级 ${row.levelName} 吗？`,
+      '删除确认',
+      {
+        type: 'warning',
+        confirmButtonText: '删除',
+        cancelButtonText: '取消',
+      },
+    );
+  } catch {
+    return;
+  }
+
+  alertLevelState.loading = true;
+  try {
+    await deleteAlertLevel(row.levelName);
+    ElMessage.success('报警等级已删除');
+    await handleFetchAlertLevels({ silent: true });
+  } catch (error) {
+    ElMessage.error(`删除失败：${resolveError(error)}`);
+  } finally {
+    alertLevelState.loading = false;
+  }
+};
+
 const handleSendEmail = async () => {
   emailState.loading = true;
   try {
@@ -918,6 +1235,7 @@ onMounted(() => {
     handleFetchKline({ silent: true }),
     handleGetThreshold({ silent: true }),
     handleFetchAlerts({ silent: true }),
+    handleFetchAlertLevels({ silent: true }),
     handleFetchRecipients({ silent: true }),
   ]);
 });

@@ -43,3 +43,13 @@ export const createMailRecipient = (payload) => apiClient.post('/mail/recipients
 export const updateMailRecipient = (id, payload) => apiClient.put(`/mail/recipients/${id}`, payload);
 
 export const deleteMailRecipient = (id) => apiClient.delete(`/mail/recipients/${id}`);
+
+export const fetchAlertLevels = () => apiClient.get('/alert/levels');
+
+export const getAlertLevel = (levelName) => apiClient.get(`/alert/levels/${levelName}`);
+
+export const createAlertLevel = (payload) => apiClient.post('/alert/levels', payload);
+
+export const updateAlertLevel = (levelName, payload) => apiClient.put(`/alert/levels/${levelName}`, payload);
+
+export const deleteAlertLevel = (levelName) => apiClient.delete(`/alert/levels/${levelName}`);

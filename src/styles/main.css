@@ -74,21 +74,47 @@ body {
 }
 
 .kline-range-group {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 8px;
+  width: 100%;
 }
 
 .kline-range-group .el-radio-button {
-  margin: 0 8px 8px 0;
+  margin: 0;
+  width: 100%;
 }
 
 .kline-range-group .el-radio-button__inner {
+  width: 100%;
   border-left: 1px solid var(--el-border-color) !important;
   border-radius: 6px !important;
+  text-align: center;
+}
+
+.kline-actions {
+  width: 100%;
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 8px;
+  align-items: stretch;
+}
+
+.kline-actions .kline-range-group {
+  grid-column: 1 / span 5;
+}
+
+.kline-refresh-btn {
+  width: 100%;
+  margin: 0;
 }
 
 .kline-card {
   margin-bottom: 24px;
+}
+
+.mobile-tab-swipe-zone {
+  width: 100%;
 }
 
 .kline-summary {
@@ -221,6 +247,19 @@ body {
     height: auto;
   }
 
+  .kline-actions {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .kline-actions .kline-range-group {
+    grid-column: 1 / -1;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .kline-actions .kline-refresh-btn {
+    grid-column: 1 / -1;
+  }
+
   .threshold-value {
     font-size: 22px;
   }
@@ -231,8 +270,13 @@ body {
 }
 
 @media (max-width: 430px) {
-  .kline-range-group .el-radio-button {
-    margin: 0 6px 6px 0;
+  .mobile-tab-swipe-zone {
+    touch-action: pan-y;
+  }
+
+  .kline-actions .kline-range-group {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 6px;
   }
 
   .kline-summary {

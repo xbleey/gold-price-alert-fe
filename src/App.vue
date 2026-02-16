@@ -8,7 +8,7 @@
       <el-card class="section-card kline-card">
         <div class="section-head">
           <p class="section-title">金价 K 线趋势</p>
-          <div class="inline-actions">
+          <div class="inline-actions kline-actions">
             <el-radio-group
               v-model="klineState.range"
               class="kline-range-group"
@@ -18,7 +18,12 @@
                 {{ item.label }}
               </el-radio-button>
             </el-radio-group>
-            <el-button type="primary" :loading="klineState.loading" @click="handleFetchKline">
+            <el-button
+              type="primary"
+              class="kline-refresh-btn"
+              :loading="klineState.loading"
+              @click="handleFetchKline"
+            >
               刷新 K 线
             </el-button>
           </div>
@@ -93,8 +98,15 @@
         </div>
       </el-card>
 
-      <el-tabs v-model="activeTab" type="border-card">
-        <el-tab-pane label="价格快照" name="price">
+      <div
+        class="mobile-tab-swipe-zone"
+        @touchstart.passive="handleTabTouchStart"
+        @touchmove.passive="handleTabTouchMove"
+        @touchend="handleTabTouchEnd"
+        @touchcancel="resetTabTouchState"
+      >
+        <el-tabs v-model="activeTab" type="border-card">
+          <el-tab-pane label="价格快照" name="price">
           <el-card class="section-card">
             <p class="section-title">最新价格抓取</p>
             <div class="inline-actions">
@@ -308,18 +320,19 @@
           </el-card>
         </el-tab-pane>
 
-        <el-tab-pane label="测试邮件" name="test-email">
-          <el-card class="section-card">
-            <p class="section-title">触发测试邮件</p>
-            <div class="inline-actions">
-              <el-button type="primary" :loading="emailState.loading" @click="handleSendEmail">
-                发送测试邮件
-              </el-button>
-              <span class="value-label">{{ emailState.message }}</span>
-            </div>
-          </el-card>
-        </el-tab-pane>
-      </el-tabs>
+          <el-tab-pane label="测试邮件" name="test-email">
+            <el-card class="section-card">
+              <p class="section-title">触发测试邮件</p>
+              <div class="inline-actions">
+                <el-button type="primary" :loading="emailState.loading" @click="handleSendEmail">
+                  发送测试邮件
+                </el-button>
+                <span class="value-label">{{ emailState.message }}</span>
+              </div>
+            </el-card>
+          </el-tab-pane>
+        </el-tabs>
+      </div>
 
       <el-dialog
         v-model="recipientState.dialogVisible"
@@ -434,6 +447,10 @@ import {
 } from './api';
 
 const activeTab = ref('price');
+const tabOrder = ['price', 'threshold', 'alerts', 'alert-level-config', 'recipients', 'test-email'];
+const MOBILE_TAB_SWIPE_MIN_DISTANCE = 56;
+const MOBILE_TAB_MAX_VERTICAL_DRIFT = 40;
+const MOBILE_TAB_HORIZONTAL_RATIO = 1.2;
 const alertLevels = ['INFO_LEVEL', 'MINOR_LEVEL', 'MODERATE_LEVEL', 'MAJOR_LEVEL', 'CRITICAL_LEVEL'];
 const defaultAlertLevels = ['MAJOR_LEVEL', 'CRITICAL_LEVEL'];
 const THRESHOLD_PATTERN = /^\d+\.\d{2}$/;
@@ -600,6 +617,93 @@ const alertLevelRules = {
 };
 
 const isPhoneViewport = ref(false);
+const tabTouchState = reactive({
+  tracking: false,
+  blocked: false,
+  startX: 0,
+  startY: 0,
+  deltaX: 0,
+  deltaY: 0,
+});
+
+const resetTabTouchState = () => {
+  tabTouchState.tracking = false;
+  tabTouchState.blocked = false;
+  tabTouchState.startX = 0;
+  tabTouchState.startY = 0;
+  tabTouchState.deltaX = 0;
+  tabTouchState.deltaY = 0;
+};
+
+const moveTabByOffset = (offset) => {
+  if (!offset) {
+    return;
+  }
+  const currentIndex = tabOrder.indexOf(activeTab.value);
+  if (currentIndex < 0) {
+    return;
+  }
+  const nextIndex = Math.min(Math.max(currentIndex + offset, 0), tabOrder.length - 1);
+  if (nextIndex === currentIndex) {
+    return;
+  }
+  activeTab.value = tabOrder[nextIndex];
+};
+
+const shouldBlockTabSwipe = (target) => {
+  if (!(target instanceof Element)) {
+    return false;
+  }
+  return Boolean(
+    target.closest(
+      'input, textarea, select, button, a, .el-input, .el-input-number, .el-select, .el-switch, .el-slider, .el-radio-group, .el-checkbox-group, .el-pagination, .el-table, .el-dialog',
+    ),
+  );
+};
+
+const handleTabTouchStart = (event) => {
+  resetTabTouchState();
+  if (!isPhoneViewport.value || event.touches.length !== 1) {
+    return;
+  }
+  if (shouldBlockTabSwipe(event.target)) {
+    tabTouchState.blocked = true;
+    return;
+  }
+  const touch = event.touches[0];
+  tabTouchState.startX = touch.clientX;
+  tabTouchState.startY = touch.clientY;
+  tabTouchState.tracking = true;
+};
+
+const handleTabTouchMove = (event) => {
+  if (!tabTouchState.tracking || tabTouchState.blocked || event.touches.length !== 1) {
+    return;
+  }
+  const touch = event.touches[0];
+  tabTouchState.deltaX = touch.clientX - tabTouchState.startX;
+  tabTouchState.deltaY = touch.clientY - tabTouchState.startY;
+};
+
+const handleTabTouchEnd = () => {
+  if (!tabTouchState.tracking || tabTouchState.blocked) {
+    resetTabTouchState();
+    return;
+  }
+
+  const absX = Math.abs(tabTouchState.deltaX);
+  const absY = Math.abs(tabTouchState.deltaY);
+  const horizontalRatio = absX / Math.max(absY, 1);
+  const isTabSwipe =
+    absX >= MOBILE_TAB_SWIPE_MIN_DISTANCE &&
+    absY <= MOBILE_TAB_MAX_VERTICAL_DRIFT &&
+    horizontalRatio >= MOBILE_TAB_HORIZONTAL_RATIO;
+
+  if (isTabSwipe) {
+    moveTabByOffset(tabTouchState.deltaX < 0 ? 1 : -1);
+  }
+  resetTabTouchState();
+};
 
 const chartModel = computed(() => {
   if (!klineState.candles.length) {

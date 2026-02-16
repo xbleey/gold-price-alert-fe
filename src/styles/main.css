@@ -150,6 +150,14 @@ body {
   color: #409eff;
 }
 
+.el-table {
+  --el-table-tr-bg-color: #ffffff;
+}
+
+.el-table--striped .el-table__body tr.el-table__row--striped td.el-table__cell {
+  background-color: #f3f4f6;
+}
+
 .alert-filter-actions {
   gap: 8px;
 }
@@ -160,6 +168,23 @@ body {
 
 .status-tag {
   margin-left: 8px;
+}
+
+.recipient-row-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.recipient-total {
+  margin-top: 14px;
+  font-size: 13px;
+  color: #64748b;
+}
+
+.recipient-dialog-footer {
+  justify-content: flex-end;
+  width: 100%;
 }
 
 .threshold-value {
@@ -194,6 +219,10 @@ body {
 
   .threshold-value {
     font-size: 22px;
+  }
+
+  .recipient-row-actions {
+    gap: 4px;
   }
 }
 

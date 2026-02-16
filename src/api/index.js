@@ -33,3 +33,13 @@ export const fetchAlertList = ({ pageNum, pageSize, alertLevels }) => {
 };
 
 export const sendTestEmail = () => apiClient.post('/test/email');
+
+export const fetchMailRecipients = () => apiClient.get('/mail/recipients');
+
+export const getMailRecipient = (id) => apiClient.get(`/mail/recipients/${id}`);
+
+export const createMailRecipient = (payload) => apiClient.post('/mail/recipients', payload);
+
+export const updateMailRecipient = (id, payload) => apiClient.put(`/mail/recipients/${id}`, payload);
+
+export const deleteMailRecipient = (id) => apiClient.delete(`/mail/recipients/${id}`);

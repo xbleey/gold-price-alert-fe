@@ -123,7 +123,7 @@
         <el-tab-pane label="阈值配置" name="threshold">
           <el-card class="section-card">
             <p class="section-title">当前阈值</p>
-            <p class="threshold-value">{{ thresholdState.info?.threshold || '-' }}</p>
+            <p class="threshold-value">{{ formatThreshold(thresholdState.info?.threshold) }}</p>
             <div class="inline-actions">
               <el-button :loading="thresholdState.loading" @click="handleGetThreshold">
                 刷新阈值
@@ -143,8 +143,9 @@
             <div class="inline-actions">
               <el-input
                 v-model="thresholdState.value"
-                placeholder="请输入阈值，例如 0.35"
-                style="max-width: 240px"
+                placeholder="请输入阈值，例如 0.35（必须两位小数）"
+                inputmode="decimal"
+                style="max-width: 280px"
               />
               <el-button type="primary" :loading="thresholdState.saving" @click="handleSetThreshold">
                 保存阈值
@@ -173,7 +174,7 @@
               </el-button>
             </div>
             <el-divider />
-            <el-table :data="alertState.records" style="width: 100%">
+            <el-table stripe :data="alertState.records" style="width: 100%">
               <el-table-column prop="alertLevel" label="等级" width="140" />
               <el-table-column prop="alertTimeBeijing" label="告警时间(北京)" min-width="200" />
               <el-table-column prop="alertTimeUtc" label="告警时间(UTC)" min-width="200" />
@@ -203,6 +204,57 @@
           </el-card>
         </el-tab-pane>
 
+        <el-tab-pane label="收件人管理" name="recipients">
+          <el-card class="section-card">
+            <div class="section-head">
+              <p class="section-title">收件人列表</p>
+              <div class="inline-actions">
+                <el-button :loading="recipientState.loading" @click="handleFetchRecipients">
+                  刷新列表
+                </el-button>
+                <el-button type="primary" @click="handleOpenRecipientCreateDialog">
+                  新增收件人
+                </el-button>
+              </div>
+            </div>
+
+            <el-table stripe v-loading="recipientState.loading" :data="recipientState.records" style="width: 100%">
+              <el-table-column prop="id" label="ID" width="100" />
+              <el-table-column prop="email" label="邮箱" min-width="260" />
+              <el-table-column prop="enabled" label="启用" width="120">
+                <template #default="{ row }">
+                  <el-tag :type="row.enabled ? 'success' : 'info'">
+                    {{ row.enabled ? '是' : '否' }}
+                  </el-tag>
+                </template>
+              </el-table-column>
+              <el-table-column prop="createdAt" label="创建时间" min-width="190">
+                <template #default="{ row }">
+                  {{ formatDateTimeValue(row.createdAt) }}
+                </template>
+              </el-table-column>
+              <el-table-column prop="updatedAt" label="更新时间" min-width="190">
+                <template #default="{ row }">
+                  {{ formatDateTimeValue(row.updatedAt) }}
+                </template>
+              </el-table-column>
+              <el-table-column label="操作" width="180" fixed="right">
+                <template #default="{ row }">
+                  <div class="recipient-row-actions">
+                    <el-button type="primary" link @click="handleOpenRecipientEditDialog(row.id)">
+                      编辑
+                    </el-button>
+                    <el-button type="danger" link @click="handleDeleteRecipient(row)">
+                      删除
+                    </el-button>
+                  </div>
+                </template>
+              </el-table-column>
+            </el-table>
+            <div class="recipient-total">共 {{ recipientState.total }} 条</div>
+          </el-card>
+        </el-tab-pane>
+
         <el-tab-pane label="测试邮件" name="test-email">
           <el-card class="section-card">
             <p class="section-title">触发测试邮件</p>
@@ -215,26 +267,61 @@
           </el-card>
         </el-tab-pane>
       </el-tabs>
+
+      <el-dialog
+        v-model="recipientState.dialogVisible"
+        :title="recipientState.mode === 'create' ? '新增收件人' : '编辑收件人'"
+        width="420px"
+        @closed="resetRecipientForm"
+      >
+        <el-form ref="recipientFormRef" :model="recipientState.form" :rules="recipientRules" label-width="76px">
+          <el-form-item label="邮箱" prop="email">
+            <el-input
+              v-model="recipientState.form.email"
+              placeholder="请输入邮箱地址"
+              maxlength="320"
+              clearable
+            />
+          </el-form-item>
+          <el-form-item label="启用" prop="enabled">
+            <el-switch v-model="recipientState.form.enabled" />
+          </el-form-item>
+        </el-form>
+        <template #footer>
+          <div class="inline-actions recipient-dialog-footer">
+            <el-button @click="recipientState.dialogVisible = false">取消</el-button>
+            <el-button type="primary" :loading="recipientState.submitting" @click="handleSubmitRecipient">
+              保存
+            </el-button>
+          </div>
+        </template>
+      </el-dialog>
     </main>
   </div>
 </template>
 
 <script setup>
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue';
-import { ElMessage } from 'element-plus';
+import { ElMessage, ElMessageBox } from 'element-plus';
 import {
   clearThreshold,
+  createMailRecipient,
+  deleteMailRecipient,
   fetchAlertList,
   fetchHistory,
+  fetchMailRecipients,
   fetchPrice,
+  getMailRecipient,
   getThreshold,
   sendTestEmail,
   setThreshold,
+  updateMailRecipient,
 } from './api';
 
 const activeTab = ref('price');
 const alertLevels = ['INFO_LEVEL', 'MINOR_LEVEL', 'MODERATE_LEVEL', 'MAJOR_LEVEL', 'CRITICAL_LEVEL'];
 const defaultAlertLevels = ['MAJOR_LEVEL', 'CRITICAL_LEVEL'];
+const THRESHOLD_PATTERN = /^\d+\.\d{2}$/;
 
 const klineRanges = [
   { label: '最近6小时', value: '6h', minutes: 360, bucketMinutes: 15, length: 2000 },
@@ -284,6 +371,47 @@ const emailState = reactive({
   loading: false,
   message: '',
 });
+
+const EMAIL_PATTERN = /^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,63}$/;
+const recipientFormRef = ref();
+const recipientState = reactive({
+  loading: false,
+  submitting: false,
+  dialogVisible: false,
+  mode: 'create',
+  records: [],
+  total: 0,
+  form: {
+    id: null,
+    email: '',
+    enabled: true,
+  },
+});
+
+const recipientRules = {
+  email: [
+    { required: true, message: '请输入邮箱地址', trigger: 'blur' },
+    {
+      validator: (_, value, callback) => {
+        const normalized = String(value || '').trim().toLowerCase();
+        if (!normalized) {
+          callback(new Error('请输入邮箱地址'));
+          return;
+        }
+        if (normalized.length > 320) {
+          callback(new Error('邮箱长度不能超过 320'));
+          return;
+        }
+        if (!EMAIL_PATTERN.test(normalized)) {
+          callback(new Error('邮箱格式不正确'));
+          return;
+        }
+        callback();
+      },
+      trigger: 'blur',
+    },
+  ],
+};
 
 const isPhoneViewport = ref(false);
 
@@ -519,14 +647,22 @@ const handleGetThreshold = async ({ silent = false } = {}) => {
 };
 
 const handleSetThreshold = async () => {
-  if (!thresholdState.value) {
+  const thresholdValue = String(thresholdState.value ?? '').trim();
+  if (!thresholdValue) {
     ElMessage.warning('请先输入阈值');
     return;
   }
+  if (!THRESHOLD_PATTERN.test(thresholdValue) || Number(thresholdValue) < 0) {
+    ElMessage.warning('请输入非负且包含两位小数的阈值，例如 0.35');
+    return;
+  }
+
+  const normalizedThreshold = Number(thresholdValue).toFixed(2);
   thresholdState.saving = true;
   try {
-    const { data } = await setThreshold(thresholdState.value);
+    const { data } = await setThreshold(normalizedThreshold);
     thresholdState.info = data;
+    thresholdState.value = normalizedThreshold;
     ElMessage.success('阈值已更新');
   } catch (error) {
     ElMessage.error(`保存失败：${resolveError(error)}`);
@@ -607,6 +743,116 @@ const handleSendEmail = async () => {
   }
 };
 
+const resetRecipientForm = () => {
+  recipientState.form.id = null;
+  recipientState.form.email = '';
+  recipientState.form.enabled = true;
+  recipientFormRef.value?.clearValidate();
+};
+
+const handleFetchRecipients = async ({ silent = false } = {}) => {
+  recipientState.loading = true;
+  try {
+    const { data } = await fetchMailRecipients();
+    recipientState.records = data.records || [];
+    recipientState.total = Number(data.total || recipientState.records.length || 0);
+  } catch (error) {
+    if (!silent) {
+      ElMessage.error(`查询失败：${resolveError(error)}`);
+    }
+  } finally {
+    recipientState.loading = false;
+  }
+};
+
+const handleOpenRecipientCreateDialog = () => {
+  recipientState.mode = 'create';
+  recipientState.dialogVisible = true;
+  resetRecipientForm();
+};
+
+const handleOpenRecipientEditDialog = async (id) => {
+  recipientState.submitting = true;
+  try {
+    const { data } = await getMailRecipient(id);
+    const record = data.record || {};
+    recipientState.mode = 'edit';
+    recipientState.form.id = record.id || id;
+    recipientState.form.email = record.email || '';
+    recipientState.form.enabled = Boolean(record.enabled);
+    recipientState.dialogVisible = true;
+    recipientFormRef.value?.clearValidate();
+  } catch (error) {
+    ElMessage.error(`读取失败：${resolveError(error)}`);
+  } finally {
+    recipientState.submitting = false;
+  }
+};
+
+const normalizeRecipientEmail = (value) => String(value || '').trim().toLowerCase();
+
+const handleSubmitRecipient = async () => {
+  const formEl = recipientFormRef.value;
+  if (!formEl) {
+    return;
+  }
+  try {
+    await formEl.validate();
+  } catch {
+    return;
+  }
+
+  recipientState.submitting = true;
+  const payload = {
+    email: normalizeRecipientEmail(recipientState.form.email),
+    enabled: Boolean(recipientState.form.enabled),
+  };
+
+  try {
+    if (recipientState.mode === 'create') {
+      await createMailRecipient(payload);
+      ElMessage.success('收件人已创建');
+    } else {
+      await updateMailRecipient(recipientState.form.id, payload);
+      ElMessage.success('收件人已更新');
+    }
+    recipientState.dialogVisible = false;
+    resetRecipientForm();
+    await handleFetchRecipients({ silent: true });
+  } catch (error) {
+    ElMessage.error(`保存失败：${resolveError(error)}`);
+  } finally {
+    recipientState.submitting = false;
+  }
+};
+
+const handleDeleteRecipient = async (row) => {
+  try {
+    await ElMessageBox.confirm(
+      `确认删除收件人 ${row.email} 吗？`,
+      '删除确认',
+      {
+        type: 'warning',
+        confirmButtonText: '删除',
+        cancelButtonText: '取消',
+      },
+    );
+  } catch {
+    return;
+  }
+
+  recipientState.loading = true;
+  try {
+    await deleteMailRecipient(row.id);
+    ElMessage.success('收件人已删除');
+    await handleFetchRecipients({ silent: true });
+  } catch (error) {
+    ElMessage.error(`删除失败：${resolveError(error)}`);
+  } finally {
+    recipientState.loading = false;
+  }
+};
+
 const resolveError = (error) => {
   if (!error) {
     return '未知错误';
@@ -636,6 +882,17 @@ const formatDateTime = (timestamp) => {
   return `${y}-${m}-${d} ${hh}:${mm}:${ss}`;
 };
 
+const formatDateTimeValue = (value) => {
+  if (!value) {
+    return '-';
+  }
+  const timestamp = typeof value === 'number' ? value : Date.parse(value);
+  if (!Number.isFinite(timestamp)) {
+    return String(value);
+  }
+  return formatDateTime(timestamp);
+};
+
 const formatPrice = (value) => {
   const price = Number(value);
   if (!Number.isFinite(price)) {
@@ -643,6 +900,8 @@ const formatPrice = (value) => {
   }
   return price.toFixed(2);
 };
+
+const formatThreshold = (value) => formatPrice(value);
 
 const updateViewportFlag = () => {
   if (typeof window === 'undefined') {
@@ -659,6 +918,7 @@ onMounted(() => {
     handleFetchKline({ silent: true }),
     handleGetThreshold({ silent: true }),
     handleFetchAlerts({ silent: true }),
+    handleFetchRecipients({ silent: true }),
   ]);
 });
 

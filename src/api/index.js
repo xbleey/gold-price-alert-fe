@@ -1,5 +1,14 @@
 import { apiClient } from './client';
 
+export const fetchCurrentUser = (authorization) =>
+  apiClient.get('/auth/me', {
+    headers: authorization
+      ? {
+          Authorization: authorization,
+        }
+      : undefined,
+  });
+
 export const fetchPrice = () => apiClient.get('/price');
 
 export const fetchHistory = (length) =>
@@ -53,3 +62,13 @@ export const createAlertLevel = (payload) => apiClient.post('/alert/levels', pay
 export const updateAlertLevel = (levelName, payload) => apiClient.put(`/alert/levels/${levelName}`, payload);
 
 export const deleteAlertLevel = (levelName) => apiClient.delete(`/alert/levels/${levelName}`);
+
+export const fetchUsers = () => apiClient.get('/users');
+
+export const getUser = (id) => apiClient.get(`/users/${id}`);
+
+export const createUser = (payload) => apiClient.post('/users', payload);
+
+export const updateUser = (id, payload) => apiClient.put(`/users/${id}`, payload);
+
+export const deleteUser = (id) => apiClient.delete(`/users/${id}`);

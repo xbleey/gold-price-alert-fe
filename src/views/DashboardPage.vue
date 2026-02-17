@@ -770,7 +770,7 @@ const chartModel = computed(() => {
       return {
         time: bar.time,
         x: bar.x,
-        label: formatDateTimeValue(bar.time),
+        label: formatKlineXAxisTime(bar.time),
       };
     })
     .filter(Boolean);
@@ -1302,6 +1302,17 @@ const showErrorMessage = (title, error) => {
     return;
   }
   ElMessage.error(`${title}：${resolveError(error)}`);
+};
+
+const formatKlineXAxisTime = (value) => {
+  const timestamp = typeof value === 'number' ? value : Date.parse(String(value || ''));
+  if (!Number.isFinite(timestamp)) {
+    return '-';
+  }
+  const date = new Date(timestamp);
+  const hh = String(date.getHours()).padStart(2, '0');
+  const mm = String(date.getMinutes()).padStart(2, '0');
+  return `${hh}:${mm}`;
 };
 
 const formatPrice = (value) => {

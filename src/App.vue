@@ -1,5 +1,15 @@
 <template>
-  <div v-if="!authState.authenticated" class="auth-shell">
+  <div v-if="isRouteNotFound" class="auth-shell">
+    <el-card class="login-card">
+      <el-result icon="warning" title="404" sub-title="页面不存在">
+        <template #extra>
+          <el-button type="primary" @click="handleNavigateToLogin">去登录页</el-button>
+        </template>
+      </el-result>
+    </el-card>
+  </div>
+
+  <div v-else-if="isLoginRoute" class="auth-shell">
     <el-card class="login-card">
       <div class="login-head">
         <h1>金价告警控制台</h1>
@@ -33,6 +43,12 @@
     </el-card>
   </div>
 
+  <div v-else-if="authState.loading || !authState.authenticated" class="auth-shell">
+    <el-card class="login-card">
+      <el-skeleton :rows="5" animated />
+    </el-card>
+  </div>
+
   <div v-else class="secure-shell">
     <div class="auth-toolbar">
       <div class="auth-toolbar-meta">
@@ -42,13 +58,13 @@
         </el-tag>
       </div>
       <div class="inline-actions">
-        <el-button :type="activePage === 'dashboard' ? 'primary' : 'default'" @click="activePage = 'dashboard'">
+        <el-button :type="currentRoutePath === '/dashboard' ? 'primary' : 'default'" @click="handleNavigateToDashboard">
           业务面板
         </el-button>
         <el-button
-          :type="activePage === 'users' ? 'primary' : 'default'"
+          :type="currentRoutePath === '/users' ? 'primary' : 'default'"
           :disabled="!isAdmin"
-          @click="activePage = 'users'"
+          @click="handleNavigateToUsers"
         >
           用户管理
         </el-button>
@@ -56,7 +72,7 @@
       </div>
     </div>
 
-    <DashboardPage v-if="activePage === 'dashboard'" />
+    <DashboardPage v-if="currentRoutePath === '/dashboard'" />
     <UserManagementPage v-else-if="isAdmin" />
     <div v-else class="app-content">
       <el-empty description="当前账号无用户管理权限" />
@@ -65,15 +81,69 @@
 </template>
 
 <script setup>
-import { computed, onMounted, reactive, ref } from 'vue';
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
 import { ElMessage } from 'element-plus';
 import DashboardPage from './views/DashboardPage.vue';
 import UserManagementPage from './views/UserManagementPage.vue';
 import { fetchCurrentUser } from './api';
+import { isAuthErrorNotified } from './api/client';
 import { buildBasicAuthToken, clearAuthToken, getAuthToken, setAuthToken } from './auth';
 
+const normalizeBasePath = (value) => {
+  const withLeadingSlash = String(value || '/').startsWith('/') ? String(value || '/') : `/${String(value || '/')}`;
+  return withLeadingSlash.endsWith('/') ? withLeadingSlash : `${withLeadingSlash}/`;
+};
+
+const normalizeRoutePath = (value) => {
+  const raw = String(value || '/').split(/[?#]/)[0] || '/';
+  if (raw === '/') {
+    return '/';
+  }
+  const normalized = raw.replace(/\/+/g, '/').replace(/^\/?/, '/').replace(/\/+$/, '');
+  return normalized || '/';
+};
+
+const APP_BASE_PATH = normalizeBasePath(import.meta.env.BASE_URL || '/');
+const APP_BASE_PATH_NO_TRAILING_SLASH = APP_BASE_PATH === '/' ? '' : APP_BASE_PATH.slice(0, -1);
+const KNOWN_ROUTE_PATHS = ['/login', '/dashboard', '/users'];
+const PROTECTED_ROUTE_PATHS = ['/dashboard', '/users'];
+
+const resolveRoutePathFromLocation = () => {
+  if (typeof window === 'undefined') {
+    return '/';
+  }
+  const pathname = String(window.location.pathname || '/');
+  if (!APP_BASE_PATH_NO_TRAILING_SLASH) {
+    return normalizeRoutePath(pathname);
+  }
+  if (pathname === APP_BASE_PATH_NO_TRAILING_SLASH) {
+    return '/';
+  }
+  if (pathname.startsWith(`${APP_BASE_PATH_NO_TRAILING_SLASH}/`)) {
+    return normalizeRoutePath(pathname.slice(APP_BASE_PATH_NO_TRAILING_SLASH.length));
+  }
+  return normalizeRoutePath(pathname);
+};
+
+const buildPathWithBase = (routePath) => {
+  const normalizedRoutePath = normalizeRoutePath(routePath);
+  if (!APP_BASE_PATH_NO_TRAILING_SLASH) {
+    return normalizedRoutePath === '/' ? '/' : normalizedRoutePath;
+  }
+  if (normalizedRoutePath === '/') {
+    return APP_BASE_PATH;
+  }
+  return `${APP_BASE_PATH_NO_TRAILING_SLASH}${normalizedRoutePath}`;
+};
+
 const loginFormRef = ref();
-const activePage = ref('dashboard');
+const currentRoutePath = ref('/');
+const redirectPath = ref('/dashboard');
+const verifiedToken = ref('');
+const routing = reactive({
+  guarding: false,
+  pendingPath: '',
+});
 
 const loginForm = reactive({
   username: 'admin',
@@ -91,10 +161,21 @@ const loginRules = {
   password: [{ required: true, message: '请输入密码', trigger: 'blur' }],
 };
 
+const isLoginRoute = computed(() => currentRoutePath.value === '/login');
+const isRouteNotFound = computed(
+  () => currentRoutePath.value !== '/' && !KNOWN_ROUTE_PATHS.includes(currentRoutePath.value),
+);
+
 const isAdmin = computed(() => {
   const roles = authState.profile?.roles || [];
   return roles.includes('ROLE_ADMIN');
 });
+
+const resetAuthState = () => {
+  authState.authenticated = false;
+  authState.profile = null;
+  verifiedToken.value = '';
+};
 
 const resolveError = (error) => {
   if (!error) {
@@ -109,12 +190,109 @@ const resolveError = (error) => {
   return error.message || String(error);
 };
 
-const loadCurrentUser = async (authorization) => {
-  const { data } = await fetchCurrentUser(authorization);
+const showErrorMessage = (title, error) => {
+  if (isAuthErrorNotified(error)) {
+    return;
+  }
+  ElMessage.error(`${title}：${resolveError(error)}`);
+};
+
+const loadCurrentUser = async (authorization, options = {}) => {
+  const { data } = await fetchCurrentUser(authorization, options);
   authState.profile = data;
   authState.authenticated = true;
-  if (!data?.roles?.includes('ROLE_ADMIN') && activePage.value === 'users') {
-    activePage.value = 'dashboard';
+  verifiedToken.value = authorization;
+  return data;
+};
+
+const isProtectedRoute = (path) => PROTECTED_ROUTE_PATHS.includes(path);
+
+const navigateTo = (path, { replace = false } = {}) => {
+  const normalizedPath = normalizeRoutePath(path);
+  currentRoutePath.value = normalizedPath;
+  if (typeof window === 'undefined') {
+    return;
+  }
+  const nextPath = buildPathWithBase(normalizedPath);
+  if (window.location.pathname === nextPath) {
+    return;
+  }
+  if (replace) {
+    window.history.replaceState(null, '', nextPath);
+    return;
+  }
+  window.history.pushState(null, '', nextPath);
+};
+
+const redirectToLogin = (path) => {
+  if (isProtectedRoute(path)) {
+    redirectPath.value = path;
+  }
+  ElMessage.warning('用户未登录，请先登录');
+  navigateTo('/login', { replace: true });
+};
+
+const guardRoute = async (path) => {
+  if (path !== '/' && !KNOWN_ROUTE_PATHS.includes(path)) {
+    return;
+  }
+
+  if (path === '/') {
+    navigateTo(getAuthToken() ? '/dashboard' : '/login', { replace: true });
+    return;
+  }
+
+  if (!isProtectedRoute(path)) {
+    if (path === '/login' && authState.authenticated) {
+      navigateTo('/dashboard', { replace: true });
+    }
+    return;
+  }
+
+  const token = getAuthToken();
+  if (!token) {
+    resetAuthState();
+    redirectToLogin(path);
+    return;
+  }
+
+  if (authState.authenticated && authState.profile && verifiedToken.value === token) {
+    return;
+  }
+
+  authState.loading = true;
+  try {
+    await loadCurrentUser(token, { suppressAuthPopup: true });
+  } catch (error) {
+    clearAuthToken();
+    resetAuthState();
+    if (error?.response?.status === 401) {
+      redirectToLogin(path);
+      return;
+    }
+    showErrorMessage('鉴权失败', error);
+    navigateTo('/login', { replace: true });
+  } finally {
+    authState.loading = false;
+  }
+};
+
+const triggerRouteGuard = async (path) => {
+  if (routing.guarding) {
+    routing.pendingPath = path;
+    return;
+  }
+
+  routing.guarding = true;
+  let nextPath = path;
+  try {
+    while (nextPath) {
+      routing.pendingPath = '';
+      await guardRoute(nextPath);
+      nextPath = routing.pendingPath;
+    }
+  } finally {
+    routing.guarding = false;
   }
 };
 
@@ -135,16 +313,17 @@ const handleLogin = async () => {
       String(loginForm.username || '').trim(),
       String(loginForm.password || ''),
     );
-    await loadCurrentUser(authorization);
+    await loadCurrentUser(authorization, { suppressAuthPopup: true });
     setAuthToken(authorization);
     loginForm.password = '';
-    activePage.value = 'dashboard';
+    const nextPath = isProtectedRoute(redirectPath.value) ? redirectPath.value : '/dashboard';
+    redirectPath.value = '/dashboard';
+    navigateTo(nextPath, { replace: true });
     ElMessage.success('登录成功');
   } catch (error) {
     clearAuthToken();
-    authState.authenticated = false;
-    authState.profile = null;
-    ElMessage.error(`登录失败：${resolveError(error)}`);
+    resetAuthState();
+    showErrorMessage('登录失败', error);
   } finally {
     authState.loading = false;
   }
@@ -152,27 +331,50 @@ const handleLogin = async () => {
 
 const handleLogout = () => {
   clearAuthToken();
-  authState.authenticated = false;
-  authState.profile = null;
-  activePage.value = 'dashboard';
+  resetAuthState();
+  redirectPath.value = '/dashboard';
   loginForm.password = '';
+  navigateTo('/login', { replace: true });
   ElMessage.success('已退出登录');
 };
 
-onMounted(async () => {
-  const token = getAuthToken();
-  if (!token) {
+const handleNavigateToLogin = () => {
+  navigateTo('/login', { replace: true });
+};
+
+const handleNavigateToDashboard = () => {
+  navigateTo('/dashboard');
+};
+
+const handleNavigateToUsers = () => {
+  navigateTo('/users');
+};
+
+const syncRoutePathFromLocation = () => {
+  currentRoutePath.value = resolveRoutePathFromLocation();
+};
+
+const handlePopstate = () => {
+  syncRoutePathFromLocation();
+};
+
+watch(currentRoutePath, (path) => {
+  void triggerRouteGuard(path);
+});
+
+onMounted(() => {
+  if (typeof window === 'undefined') {
     return;
   }
-  authState.loading = true;
-  try {
-    await loadCurrentUser(token);
-  } catch {
-    clearAuthToken();
-    authState.authenticated = false;
-    authState.profile = null;
-  } finally {
-    authState.loading = false;
+  syncRoutePathFromLocation();
+  window.addEventListener('popstate', handlePopstate);
+  void triggerRouteGuard(currentRoutePath.value);
+});
+
+onBeforeUnmount(() => {
+  if (typeof window === 'undefined') {
+    return;
   }
+  window.removeEventListener('popstate', handlePopstate);
 });
 </script>

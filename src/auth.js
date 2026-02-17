@@ -28,3 +28,42 @@ export const buildBasicAuthToken = (username, password) => {
   }
   return `Basic ${btoa(account)}`;
 };
+
+const decodeBase64 = (value) => {
+  if (typeof window !== 'undefined' && typeof window.atob === 'function') {
+    return window.atob(value);
+  }
+  return atob(value);
+};
+
+export const parseBasicAuthToken = (token) => {
+  const rawToken = String(token || '').trim();
+  if (!rawToken) {
+    return null;
+  }
+  if (!/^basic\s+/i.test(rawToken)) {
+    return null;
+  }
+
+  const encoded = rawToken.replace(/^basic\s+/i, '').trim();
+  if (!encoded) {
+    return null;
+  }
+
+  try {
+    const decoded = decodeBase64(encoded);
+    const separatorIndex = decoded.indexOf(':');
+    if (separatorIndex < 0) {
+      return {
+        username: decoded,
+        password: '',
+      };
+    }
+    return {
+      username: decoded.slice(0, separatorIndex),
+      password: decoded.slice(separatorIndex + 1),
+    };
+  } catch {
+    return null;
+  }
+};

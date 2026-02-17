@@ -1,13 +1,45 @@
 import { apiClient } from './client';
+import { getAuthToken, parseBasicAuthToken } from '../auth';
 
-export const fetchCurrentUser = (authorization) =>
-  apiClient.get('/auth/me', {
-    headers: authorization
-      ? {
-          Authorization: authorization,
-        }
-      : undefined,
-  });
+const resolveAuthorization = (authorization) => String(authorization || getAuthToken() || '').trim();
+
+const resolveUsernameFromToken = (authorization) => {
+  const parsed = parseBasicAuthToken(authorization);
+  return String(parsed?.username || '').trim().toLowerCase();
+};
+
+export const fetchCurrentUser = async (authorization, options = {}) => {
+  const authHeader = resolveAuthorization(authorization);
+  if (!authHeader) {
+    throw new Error('missing authorization token');
+  }
+
+  const headers = {
+    Authorization: authHeader,
+  };
+  const suppressAuthPopup = Boolean(options.suppressAuthPopup);
+
+  let roles = ['ROLE_USER'];
+  try {
+    await apiClient.get('/users', {
+      headers,
+      suppressAuthPopup,
+    });
+    roles = ['ROLE_ADMIN'];
+  } catch (error) {
+    if (error?.response?.status !== 403) {
+      throw error;
+    }
+  }
+
+  const username = resolveUsernameFromToken(authHeader);
+  return {
+    data: {
+      username: username || '-',
+      roles,
+    },
+  };
+};
 
 export const fetchPrice = () => apiClient.get('/price');
 

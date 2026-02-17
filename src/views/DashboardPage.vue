@@ -120,7 +120,7 @@
             <el-divider />
             <el-descriptions :column="1" border>
               <el-descriptions-item label="抓取时间">
-                {{ priceState.result?.fetchedAt || '-' }}
+                {{ formatDateTimeValue(priceState.result?.fetchedAt) }}
               </el-descriptions-item>
               <el-descriptions-item label="价格">
                 {{ formatPrice(priceState.result?.price) }}
@@ -188,8 +188,16 @@
             <el-divider />
             <el-table stripe :data="alertState.records" style="width: 100%">
               <el-table-column prop="alertLevel" label="等级" width="140" />
-              <el-table-column prop="alertTimeBeijing" label="告警时间(北京)" min-width="200" />
-              <el-table-column prop="alertTimeUtc" label="告警时间(UTC)" min-width="200" />
+              <el-table-column prop="alertTimeBeijing" label="告警时间(北京)" min-width="200">
+                <template #default="{ row }">
+                  {{ formatDateTimeValue(row.alertTimeBeijing) }}
+                </template>
+              </el-table-column>
+              <el-table-column prop="alertTimeUtc" label="告警时间(UTC)" min-width="200">
+                <template #default="{ row }">
+                  {{ formatDateTimeValue(row.alertTimeUtc) }}
+                </template>
+              </el-table-column>
               <el-table-column prop="thresholdPercent" label="阈值%" width="120" />
               <el-table-column prop="changePercent" label="涨跌幅%" width="120" />
               <el-table-column prop="baselinePrice" label="基准价" width="120">
@@ -426,6 +434,8 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue';
 import { ElMessage, ElMessageBox } from 'element-plus';
+import { isAuthErrorNotified } from '../api/client';
+import { formatDateTimeValue } from '../utils/dateTime';
 import {
   createAlertLevel,
   clearThreshold,
@@ -760,7 +770,7 @@ const chartModel = computed(() => {
       return {
         time: bar.time,
         x: bar.x,
-        label: formatTime(bar.time),
+        label: formatDateTimeValue(bar.time),
       };
     })
     .filter(Boolean);
@@ -877,7 +887,7 @@ const applyKlineWindow = () => {
   if (latest) {
     klineState.latestPrice = formatPrice(latest.price);
     klineState.latestSymbol = latest.symbol;
-    klineState.latestTime = formatDateTime(latest.timestamp);
+    klineState.latestTime = formatDateTimeValue(latest.timestamp);
   } else {
     klineState.latestPrice = '-';
     klineState.latestSymbol = '-';
@@ -894,7 +904,7 @@ const handleFetchPrice = async ({ silent = false } = {}) => {
       ElMessage.success('价格已更新');
     }
   } catch (error) {
-    ElMessage.error(`抓取失败：${resolveError(error)}`);
+    showErrorMessage('抓取失败', error);
   } finally {
     priceState.loading = false;
   }
@@ -911,7 +921,7 @@ const handleFetchKline = async ({ silent = false } = {}) => {
       ElMessage.success('K 线数据已更新');
     }
   } catch (error) {
-    ElMessage.error(`加载失败：${resolveError(error)}`);
+    showErrorMessage('加载失败', error);
   } finally {
     klineState.loading = false;
   }
@@ -929,7 +939,7 @@ const handleGetThreshold = async ({ silent = false } = {}) => {
     thresholdState.info = data;
   } catch (error) {
     if (!silent) {
-      ElMessage.error(`读取失败：${resolveError(error)}`);
+      showErrorMessage('读取失败', error);
     }
   } finally {
     thresholdState.loading = false;
@@ -955,7 +965,7 @@ const handleSetThreshold = async () => {
     thresholdState.value = normalizedThreshold;
     ElMessage.success('阈值已更新');
   } catch (error) {
-    ElMessage.error(`保存失败：${resolveError(error)}`);
+    showErrorMessage('保存失败', error);
   } finally {
     thresholdState.saving = false;
   }
@@ -969,7 +979,7 @@ const handleClearThreshold = async () => {
     thresholdState.value = '';
     ElMessage.success('阈值已清空');
   } catch (error) {
-    ElMessage.error(`清空失败：${resolveError(error)}`);
+    showErrorMessage('清空失败', error);
   } finally {
     thresholdState.clearing = false;
   }
@@ -989,7 +999,7 @@ const handleFetchAlerts = async ({ silent = false } = {}) => {
     alertState.total = Number(data.total || 0);
   } catch (error) {
     if (!silent) {
-      ElMessage.error(`查询失败：${resolveError(error)}`);
+      showErrorMessage('查询失败', error);
     }
   } finally {
     alertState.loading = false;
@@ -1048,7 +1058,7 @@ const handleFetchAlertLevels = async ({ silent = false } = {}) => {
     alertLevelState.total = Number(data.total || alertLevelState.records.length || 0);
   } catch (error) {
     if (!silent) {
-      ElMessage.error(`查询失败：${resolveError(error)}`);
+      showErrorMessage('查询失败', error);
     }
   } finally {
     alertLevelState.loading = false;
@@ -1074,7 +1084,7 @@ const handleOpenAlertLevelEditDialog = async (levelName) => {
     alertLevelState.dialogVisible = true;
     alertLevelFormRef.value?.clearValidate();
   } catch (error) {
-    ElMessage.error(`读取失败：${resolveError(error)}`);
+    showErrorMessage('读取失败', error);
   } finally {
     alertLevelState.submitting = false;
   }
@@ -1114,7 +1124,7 @@ const handleSubmitAlertLevel = async () => {
     resetAlertLevelForm();
     await handleFetchAlertLevels({ silent: true });
   } catch (error) {
-    ElMessage.error(`保存失败：${resolveError(error)}`);
+    showErrorMessage('保存失败', error);
   } finally {
     alertLevelState.submitting = false;
   }
@@ -1145,7 +1155,7 @@ const handleDeleteAlertLevel = async (row) => {
     ElMessage.success('报警等级已删除');
     await handleFetchAlertLevels({ silent: true });
   } catch (error) {
-    ElMessage.error(`删除失败：${resolveError(error)}`);
+    showErrorMessage('删除失败', error);
   } finally {
     alertLevelState.loading = false;
   }
@@ -1158,7 +1168,7 @@ const handleSendEmail = async () => {
     emailState.message = data;
     ElMessage.success('测试邮件已触发');
   } catch (error) {
-    ElMessage.error(`发送失败：${resolveError(error)}`);
+    showErrorMessage('发送失败', error);
   } finally {
     emailState.loading = false;
   }
@@ -1179,7 +1189,7 @@ const handleFetchRecipients = async ({ silent = false } = {}) => {
     recipientState.total = Number(data.total || recipientState.records.length || 0);
   } catch (error) {
     if (!silent) {
-      ElMessage.error(`查询失败：${resolveError(error)}`);
+      showErrorMessage('查询失败', error);
     }
   } finally {
     recipientState.loading = false;
@@ -1204,7 +1214,7 @@ const handleOpenRecipientEditDialog = async (id) => {
     recipientState.dialogVisible = true;
     recipientFormRef.value?.clearValidate();
   } catch (error) {
-    ElMessage.error(`读取失败：${resolveError(error)}`);
+    showErrorMessage('读取失败', error);
   } finally {
     recipientState.submitting = false;
   }
@@ -1241,7 +1251,7 @@ const handleSubmitRecipient = async () => {
     resetRecipientForm();
     await handleFetchRecipients({ silent: true });
   } catch (error) {
-    ElMessage.error(`保存失败：${resolveError(error)}`);
+    showErrorMessage('保存失败', error);
   } finally {
     recipientState.submitting = false;
   }
@@ -1268,7 +1278,7 @@ const handleDeleteRecipient = async (row) => {
     ElMessage.success('收件人已删除');
     await handleFetchRecipients({ silent: true });
   } catch (error) {
-    ElMessage.error(`删除失败：${resolveError(error)}`);
+    showErrorMessage('删除失败', error);
   } finally {
     recipientState.loading = false;
   }
@@ -1287,31 +1297,11 @@ const resolveError = (error) => {
   return error.message || String(error);
 };
 
-const formatTime = (timestamp) => {
-  const date = new Date(timestamp);
-  return `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
-};
-
-const formatDateTime = (timestamp) => {
-  const date = new Date(timestamp);
-  const y = date.getFullYear();
-  const m = String(date.getMonth() + 1).padStart(2, '0');
-  const d = String(date.getDate()).padStart(2, '0');
-  const hh = String(date.getHours()).padStart(2, '0');
-  const mm = String(date.getMinutes()).padStart(2, '0');
-  const ss = String(date.getSeconds()).padStart(2, '0');
-  return `${y}-${m}-${d} ${hh}:${mm}:${ss}`;
-};
-
-const formatDateTimeValue = (value) => {
-  if (!value) {
-    return '-';
+const showErrorMessage = (title, error) => {
+  if (isAuthErrorNotified(error)) {
+    return;
   }
-  const timestamp = typeof value === 'number' ? value : Date.parse(value);
-  if (!Number.isFinite(timestamp)) {
-    return String(value);
-  }
-  return formatDateTime(timestamp);
+  ElMessage.error(`${title}：${resolveError(error)}`);
 };
 
 const formatPrice = (value) => {
@@ -1351,3 +1341,4 @@ onBeforeUnmount(() => {
   window.removeEventListener('resize', updateViewportFlag);
 });
 </script>
+

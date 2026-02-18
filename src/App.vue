@@ -12,8 +12,29 @@
   <div v-else-if="isLoginRoute" class="auth-shell">
     <el-card class="login-card">
       <div class="login-head">
-        <h1>金价告警控制台</h1>
-        <p>请输入账号密码完成登录</p>
+        <h1 class="login-title">
+          <img class="login-title-icon" src="/gold-icon.png" alt="" aria-hidden="true" />
+          <span>金价告警控制台</span>
+          <img class="login-title-icon" src="/gold-icon.png" alt="" aria-hidden="true" />
+        </h1>
+        <div class="login-slogans" aria-label="login slogans">
+          <p>
+            <img class="login-slogan-icon" src="/fist.png" alt="" aria-hidden="true" />
+            <span class="login-slogan-text">Make Gold Great Again!!</span>
+          </p>
+          <p>
+            <img class="login-slogan-icon" src="/fist.png" alt="" aria-hidden="true" />
+            <span class="login-slogan-text">Make Gold Wealth Again!!</span>
+          </p>
+          <p>
+            <img class="login-slogan-icon" src="/fist.png" alt="" aria-hidden="true" />
+            <span class="login-slogan-text">Make Gold Strong Again!!</span>
+          </p>
+          <p>
+            <img class="login-slogan-icon" src="/fist.png" alt="" aria-hidden="true" />
+            <span class="login-slogan-text">Make Jimmy Rich Again!!</span>
+          </p>
+        </div>
       </div>
       <el-form ref="loginFormRef" :model="loginForm" :rules="loginRules" label-position="top">
         <el-form-item label="用户名" prop="username">
@@ -39,7 +60,6 @@
           登录
         </el-button>
       </el-form>
-      <p class="login-hint">默认管理员：admin / admin</p>
     </el-card>
   </div>
 

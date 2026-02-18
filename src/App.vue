@@ -105,9 +105,9 @@ import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus';
 import DashboardPage from './views/DashboardPage.vue';
 import UserManagementPage from './views/UserManagementPage.vue';
-import { fetchCurrentUser } from './api';
+import { fetchCurrentUser, login as loginByPassword, logout as logoutByToken } from './api';
 import { isAuthErrorNotified } from './api/client';
-import { buildBasicAuthToken, clearAuthToken, getAuthToken, setAuthToken } from './auth';
+import { clearAuthSession, getAuthToken, setAuthSession } from './auth';
 
 const normalizeBasePath = (value) => {
   const withLeadingSlash = String(value || '/').startsWith('/') ? String(value || '/') : `/${String(value || '/')}`;
@@ -127,6 +127,7 @@ const APP_BASE_PATH = normalizeBasePath(import.meta.env.BASE_URL || '/');
 const APP_BASE_PATH_NO_TRAILING_SLASH = APP_BASE_PATH === '/' ? '' : APP_BASE_PATH.slice(0, -1);
 const KNOWN_ROUTE_PATHS = ['/login', '/dashboard', '/users'];
 const PROTECTED_ROUTE_PATHS = ['/dashboard', '/users'];
+const normalizeRole = (value) => String(value || 'USER').trim().toUpperCase() || 'USER';
 
 const resolveRoutePathFromLocation = () => {
   if (typeof window === 'undefined') {
@@ -221,7 +222,7 @@ const loadCurrentUser = async (authorization, options = {}) => {
   const { data } = await fetchCurrentUser(authorization, options);
   authState.profile = data;
   authState.authenticated = true;
-  verifiedToken.value = authorization;
+  verifiedToken.value = getAuthToken();
   return data;
 };
 
@@ -263,7 +264,7 @@ const guardRoute = async (path) => {
   }
 
   if (!isProtectedRoute(path)) {
-    if (path === '/login' && authState.authenticated) {
+    if (path === '/login' && (authState.authenticated || getAuthToken())) {
       navigateTo('/dashboard', { replace: true });
     }
     return;
@@ -284,7 +285,7 @@ const guardRoute = async (path) => {
   try {
     await loadCurrentUser(token, { suppressAuthPopup: true });
   } catch (error) {
-    clearAuthToken();
+    clearAuthSession();
     resetAuthState();
     if (error?.response?.status === 401) {
       redirectToLogin(path);
@@ -329,19 +330,31 @@ const handleLogin = async () => {
 
   authState.loading = true;
   try {
-    const authorization = buildBasicAuthToken(
-      String(loginForm.username || '').trim(),
-      String(loginForm.password || ''),
+    const username = String(loginForm.username || '').trim();
+    const password = String(loginForm.password || '');
+    const { data } = await loginByPassword(
+      username,
+      password,
+      { suppressAuthPopup: true },
     );
-    await loadCurrentUser(authorization, { suppressAuthPopup: true });
-    setAuthToken(authorization);
+    const accessToken = String(data?.accessToken || '').trim();
+    if (!accessToken) {
+      throw new Error('登录成功但未返回 accessToken');
+    }
+    setAuthSession({
+      accessToken,
+      username: String(data?.username || username).trim().toLowerCase(),
+      role: normalizeRole(data?.role),
+      expiresAt: data?.expiresAt,
+    });
+    await loadCurrentUser(accessToken, { suppressAuthPopup: true });
     loginForm.password = '';
     const nextPath = isProtectedRoute(redirectPath.value) ? redirectPath.value : '/dashboard';
     redirectPath.value = '/dashboard';
     navigateTo(nextPath, { replace: true });
     ElMessage.success('登录成功');
   } catch (error) {
-    clearAuthToken();
+    clearAuthSession();
     resetAuthState();
     showErrorMessage('登录失败', error);
   } finally {
@@ -349,12 +362,27 @@ const handleLogin = async () => {
   }
 };
 
-const handleLogout = () => {
-  clearAuthToken();
+const handleLogout = async () => {
+  let logoutError = null;
+  if (getAuthToken()) {
+    try {
+      await logoutByToken({ suppressAuthPopup: true });
+    } catch (error) {
+      logoutError = error;
+    }
+  }
+
+  clearAuthSession();
   resetAuthState();
   redirectPath.value = '/dashboard';
   loginForm.password = '';
   navigateTo('/login', { replace: true });
+
+  const logoutStatus = Number(logoutError?.response?.status);
+  if (logoutError && logoutStatus !== 400 && logoutStatus !== 401) {
+    ElMessage.warning('服务端登出失败，本地会话已清理');
+    return;
+  }
   ElMessage.success('已退出登录');
 };
 

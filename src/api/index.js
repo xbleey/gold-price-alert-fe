@@ -1,11 +1,58 @@
 import { apiClient } from './client';
-import { getAuthToken, parseBasicAuthToken } from '../auth';
+import { getAuthSession, getAuthToken } from '../auth';
 
-const resolveAuthorization = (authorization) => String(authorization || getAuthToken() || '').trim();
+const toBearerAuthorization = (value) => {
+  const raw = String(value || '').trim();
+  if (!raw) {
+    return '';
+  }
+  if (/^bearer\s+/i.test(raw)) {
+    return raw;
+  }
+  return `Bearer ${raw}`;
+};
 
-const resolveUsernameFromToken = (authorization) => {
-  const parsed = parseBasicAuthToken(authorization);
-  return String(parsed?.username || '').trim().toLowerCase();
+const resolveAuthorization = (authorization) => toBearerAuthorization(authorization || getAuthToken());
+
+const resolveUsernameFromSession = () => {
+  const session = getAuthSession();
+  return String(session?.username || '').trim().toLowerCase();
+};
+
+export const login = (username, password, options = {}) =>
+  apiClient.post(
+    '/auth/login',
+    {
+      username: String(username || '').trim(),
+      password: String(password || ''),
+    },
+    {
+      skipAuth: true,
+      suppressAuthPopup: Boolean(options.suppressAuthPopup),
+    },
+  );
+
+export const logout = (options = {}) =>
+  apiClient.post('/auth/logout', null, {
+    suppressAuthPopup: Boolean(options.suppressAuthPopup),
+  });
+
+const normalizeRole = (value) => String(value || '').trim().toUpperCase();
+
+const resolveRolesFromProfile = (profile) => {
+  const authorities = Array.isArray(profile?.authorities)
+    ? profile.authorities
+      .map((item) => String(item || '').trim())
+      .filter(Boolean)
+    : [];
+  if (authorities.length) {
+    return authorities;
+  }
+  const role = normalizeRole(profile?.role);
+  if (role) {
+    return [`ROLE_${role}`];
+  }
+  return ['ROLE_USER'];
 };
 
 export const fetchCurrentUser = async (authorization, options = {}) => {
@@ -13,30 +60,21 @@ export const fetchCurrentUser = async (authorization, options = {}) => {
   if (!authHeader) {
     throw new Error('missing authorization token');
   }
-
-  const headers = {
-    Authorization: authHeader,
-  };
   const suppressAuthPopup = Boolean(options.suppressAuthPopup);
+  const { data: profile } = await apiClient.get('/auth/me', {
+    headers: {
+      Authorization: authHeader,
+    },
+    suppressAuthPopup,
+  });
 
-  let roles = ['ROLE_USER'];
-  try {
-    await apiClient.get('/users', {
-      headers,
-      suppressAuthPopup,
-    });
-    roles = ['ROLE_ADMIN'];
-  } catch (error) {
-    if (error?.response?.status !== 403) {
-      throw error;
-    }
-  }
-
-  const username = resolveUsernameFromToken(authHeader);
+  const username = String(profile?.username || resolveUsernameFromSession()).trim().toLowerCase();
   return {
     data: {
       username: username || '-',
-      roles,
+      roles: resolveRolesFromProfile(profile),
+      role: normalizeRole(profile?.role || ''),
+      expiresAt: profile?.expiresAt,
     },
   };
 };

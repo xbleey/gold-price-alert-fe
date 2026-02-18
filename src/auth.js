@@ -1,69 +1,78 @@
-const AUTH_STORAGE_KEY = 'gold-alert-basic-auth-token';
+const AUTH_SESSION_STORAGE_KEY = 'gold-alert-auth-session';
+const LEGACY_BASIC_AUTH_STORAGE_KEY = 'gold-alert-basic-auth-token';
 
-export const getAuthToken = () => {
-  if (typeof window === 'undefined') {
-    return '';
-  }
-  return localStorage.getItem(AUTH_STORAGE_KEY) || '';
-};
+const normalizeRole = (value) => String(value || 'USER').trim().toUpperCase() || 'USER';
 
-export const setAuthToken = (token) => {
-  if (typeof window === 'undefined') {
-    return;
-  }
-  localStorage.setItem(AUTH_STORAGE_KEY, token);
-};
-
-export const clearAuthToken = () => {
-  if (typeof window === 'undefined') {
-    return;
-  }
-  localStorage.removeItem(AUTH_STORAGE_KEY);
-};
-
-export const buildBasicAuthToken = (username, password) => {
-  const account = `${username ?? ''}:${password ?? ''}`;
-  if (typeof window !== 'undefined' && typeof window.btoa === 'function') {
-    return `Basic ${window.btoa(account)}`;
-  }
-  return `Basic ${btoa(account)}`;
-};
-
-const decodeBase64 = (value) => {
-  if (typeof window !== 'undefined' && typeof window.atob === 'function') {
-    return window.atob(value);
-  }
-  return atob(value);
-};
-
-export const parseBasicAuthToken = (token) => {
-  const rawToken = String(token || '').trim();
-  if (!rawToken) {
+const normalizeAuthSession = (session) => {
+  const accessToken = String(session?.accessToken || '').trim();
+  if (!accessToken) {
     return null;
   }
-  if (!/^basic\s+/i.test(rawToken)) {
+  return {
+    accessToken,
+    username: String(session?.username || '').trim().toLowerCase(),
+    role: normalizeRole(session?.role),
+    expiresAt: String(session?.expiresAt || '').trim(),
+  };
+};
+
+const readStoredSession = () => {
+  const raw = localStorage.getItem(AUTH_SESSION_STORAGE_KEY);
+  if (!raw) {
     return null;
   }
-
-  const encoded = rawToken.replace(/^basic\s+/i, '').trim();
-  if (!encoded) {
-    return null;
-  }
-
   try {
-    const decoded = decodeBase64(encoded);
-    const separatorIndex = decoded.indexOf(':');
-    if (separatorIndex < 0) {
-      return {
-        username: decoded,
-        password: '',
-      };
-    }
-    return {
-      username: decoded.slice(0, separatorIndex),
-      password: decoded.slice(separatorIndex + 1),
-    };
+    return JSON.parse(raw);
   } catch {
     return null;
   }
+};
+
+export const getAuthSession = () => {
+  if (typeof window === 'undefined') {
+    return null;
+  }
+  const normalized = normalizeAuthSession(readStoredSession());
+  if (!normalized) {
+    localStorage.removeItem(AUTH_SESSION_STORAGE_KEY);
+  }
+  if (localStorage.getItem(LEGACY_BASIC_AUTH_STORAGE_KEY)) {
+    localStorage.removeItem(LEGACY_BASIC_AUTH_STORAGE_KEY);
+  }
+  return normalized;
+};
+
+export const setAuthSession = (session) => {
+  if (typeof window === 'undefined') {
+    return;
+  }
+  const normalized = normalizeAuthSession(session);
+  if (!normalized) {
+    localStorage.removeItem(AUTH_SESSION_STORAGE_KEY);
+    return;
+  }
+  localStorage.setItem(AUTH_SESSION_STORAGE_KEY, JSON.stringify(normalized));
+  localStorage.removeItem(LEGACY_BASIC_AUTH_STORAGE_KEY);
+};
+
+export const clearAuthSession = () => {
+  if (typeof window === 'undefined') {
+    return;
+  }
+  localStorage.removeItem(AUTH_SESSION_STORAGE_KEY);
+  localStorage.removeItem(LEGACY_BASIC_AUTH_STORAGE_KEY);
+};
+
+export const getAuthToken = () => getAuthSession()?.accessToken || '';
+
+export const setAuthToken = (token) => {
+  const currentSession = getAuthSession() || {};
+  setAuthSession({
+    ...currentSession,
+    accessToken: token,
+  });
+};
+
+export const clearAuthToken = () => {
+  clearAuthSession();
 };

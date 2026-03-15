@@ -155,7 +155,7 @@
             <div class="inline-actions">
               <el-input
                 v-model="thresholdState.value"
-                placeholder="请输入阈值，例如 0.35（必须两位小数）"
+                placeholder="请输入阈值，例如 35.129（保存时截断为两位小数）"
                 inputmode="decimal"
                 style="max-width: 280px"
               />
@@ -463,7 +463,7 @@ const MOBILE_TAB_MAX_VERTICAL_DRIFT = 40;
 const MOBILE_TAB_HORIZONTAL_RATIO = 1.2;
 const alertLevels = ['INFO_LEVEL', 'MINOR_LEVEL', 'MODERATE_LEVEL', 'MAJOR_LEVEL', 'CRITICAL_LEVEL'];
 const defaultAlertLevels = ['MAJOR_LEVEL', 'CRITICAL_LEVEL'];
-const THRESHOLD_PATTERN = /^\d+\.\d{2}$/;
+const NON_NEGATIVE_NUMBER_PATTERN = /^(?:\d+\.?\d*|\.\d+)$/;
 const ALERT_LEVEL_NAME_PATTERN = /^P[1-9]\d*$/i;
 const ALERT_LEVEL_THRESHOLD_PATTERN = /^(?:10\.00|[0-9]\.\d{2})$/;
 
@@ -937,6 +937,7 @@ const handleGetThreshold = async ({ silent = false } = {}) => {
   try {
     const { data } = await getThreshold();
     thresholdState.info = data;
+    thresholdState.value = data?.threshold == null ? '' : formatThreshold(data.threshold);
   } catch (error) {
     if (!silent) {
       showErrorMessage('读取失败', error);
@@ -946,18 +947,30 @@ const handleGetThreshold = async ({ silent = false } = {}) => {
   }
 };
 
+const normalizeThresholdForSubmit = (value) => {
+  const normalized = String(value ?? '').trim();
+  if (!normalized || !NON_NEGATIVE_NUMBER_PATTERN.test(normalized)) {
+    return '';
+  }
+
+  const [integerPartRaw = '0', decimalPartRaw = ''] = normalized.split('.');
+  const integerPart = integerPartRaw === '' ? '0' : String(Number.parseInt(integerPartRaw, 10));
+  const decimalPart = `${decimalPartRaw}00`.slice(0, 2);
+  return `${integerPart}.${decimalPart}`;
+};
+
 const handleSetThreshold = async () => {
   const thresholdValue = String(thresholdState.value ?? '').trim();
   if (!thresholdValue) {
     ElMessage.warning('请先输入阈值');
     return;
   }
-  if (!THRESHOLD_PATTERN.test(thresholdValue) || Number(thresholdValue) < 0) {
-    ElMessage.warning('请输入非负且包含两位小数的阈值，例如 0.35');
+  if (!NON_NEGATIVE_NUMBER_PATTERN.test(thresholdValue) || Number(thresholdValue) < 0) {
+    ElMessage.warning('请输入非负数字，例如 35、35.1 或 35.12');
     return;
   }
 
-  const normalizedThreshold = Number(thresholdValue).toFixed(2);
+  const normalizedThreshold = normalizeThresholdForSubmit(thresholdValue);
   thresholdState.saving = true;
   try {
     const { data } = await setThreshold(normalizedThreshold);

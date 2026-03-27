@@ -34,66 +34,8 @@
           <span>最新时间：{{ klineState.latestTime }}</span>
           <span>样本数：{{ klineState.windowData.length }}</span>
         </div>
-        <div class="chart-wrapper">
-          <svg
-            v-if="chartModel"
-            class="kline-svg"
-            :viewBox="`0 0 ${chartModel.width} ${chartModel.height}`"
-            preserveAspectRatio="xMidYMid meet"
-          >
-            <g>
-              <line
-                v-for="line in chartModel.gridLines"
-                :key="line.y"
-                class="chart-grid-line"
-                :x1="chartModel.padding.left"
-                :y1="line.y"
-                :x2="chartModel.width - chartModel.padding.right"
-                :y2="line.y"
-              />
-              <text
-                v-for="line in chartModel.gridLines"
-                :key="`label-${line.y}`"
-                class="chart-y-label"
-                :x="chartModel.padding.left - 8"
-                :y="line.y + 4"
-              >
-                {{ line.label }}
-              </text>
-            </g>
-            <g>
-              <line
-                v-for="bar in chartModel.bars"
-                :key="`wick-${bar.time}`"
-                class="chart-wick"
-                :x1="bar.x"
-                :y1="bar.wickTop"
-                :x2="bar.x"
-                :y2="bar.wickBottom"
-              />
-              <rect
-                v-for="bar in chartModel.bars"
-                :key="`body-${bar.time}`"
-                class="chart-body"
-                :x="bar.bodyX"
-                :y="bar.bodyY"
-                :width="bar.bodyWidth"
-                :height="bar.bodyHeight"
-                :fill="bar.color"
-              />
-            </g>
-            <g>
-              <text
-                v-for="label in chartModel.xLabels"
-                :key="label.time"
-                class="chart-x-label"
-                :x="label.x"
-                :y="chartModel.height - 10"
-              >
-                {{ label.label }}
-              </text>
-            </g>
-          </svg>
+        <div ref="chartWrapperRef" class="chart-wrapper">
+          <div v-if="klineState.candles.length" ref="klineChartRef" class="kline-chart" />
           <el-empty v-else description="当前时间窗口暂无可用历史数据" />
         </div>
       </el-card>
@@ -432,7 +374,11 @@
 </template>
 
 <script setup>
-import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue';
+import { nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
+import * as echarts from 'echarts/core';
+import { CandlestickChart, LineChart } from 'echarts/charts';
+import { DataZoomComponent, GridComponent, MarkLineComponent, TooltipComponent } from 'echarts/components';
+import { CanvasRenderer } from 'echarts/renderers';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import { isAuthErrorNotified } from '../api/client';
 import { formatDateTimeValue } from '../utils/dateTime';
@@ -455,6 +401,16 @@ import {
   updateAlertLevel,
   updateMailRecipient,
 } from '../api';
+
+echarts.use([
+  CandlestickChart,
+  LineChart,
+  DataZoomComponent,
+  GridComponent,
+  MarkLineComponent,
+  TooltipComponent,
+  CanvasRenderer,
+]);
 
 const activeTab = ref('price');
 const tabOrder = ['price', 'threshold', 'alerts', 'alert-level-config', 'recipients', 'test-email'];
@@ -627,6 +583,8 @@ const alertLevelRules = {
 };
 
 const isPhoneViewport = ref(false);
+const chartWrapperRef = ref();
+const klineChartRef = ref();
 const tabTouchState = reactive({
   tracking: false,
   blocked: false,
@@ -714,76 +672,6 @@ const handleTabTouchEnd = () => {
   }
   resetTabTouchState();
 };
-
-const chartModel = computed(() => {
-  if (!klineState.candles.length) {
-    return null;
-  }
-  const width = isPhoneViewport.value ? 860 : 1100;
-  const height = isPhoneViewport.value ? 520 : 430;
-  const padding = isPhoneViewport.value
-    ? { top: 20, right: 18, bottom: 36, left: 58 }
-    : { top: 24, right: 24, bottom: 42, left: 66 };
-  const innerWidth = width - padding.left - padding.right;
-  const innerHeight = height - padding.top - padding.bottom;
-  const maxPrice = Math.max(...klineState.candles.map((item) => item.high));
-  const minPrice = Math.min(...klineState.candles.map((item) => item.low));
-  const priceSpan = Math.max(maxPrice - minPrice, maxPrice * 0.002, 0.01);
-  const slotWidth = innerWidth / Math.max(klineState.candles.length, 1);
-  const bodyWidth = Math.max(5, Math.min(slotWidth * 0.56, 18));
-
-  const toY = (price) => padding.top + ((maxPrice - price) / priceSpan) * innerHeight;
-  const bars = klineState.candles.map((item, index) => {
-    const x = padding.left + slotWidth * index + slotWidth / 2;
-    const upper = Math.max(item.open, item.close);
-    const lower = Math.min(item.open, item.close);
-    const top = toY(upper);
-    const bottom = toY(lower);
-    return {
-      time: item.time,
-      x,
-      wickTop: toY(item.high),
-      wickBottom: toY(item.low),
-      bodyX: x - bodyWidth / 2,
-      bodyY: top,
-      bodyWidth,
-      bodyHeight: Math.max(bottom - top, 1),
-      color: item.close >= item.open ? '#22c55e' : '#ef4444',
-    };
-  });
-
-  const gridLines = Array.from({ length: 5 }, (_, index) => {
-    const ratio = index / 4;
-    const value = maxPrice - priceSpan * ratio;
-    return {
-      y: padding.top + innerHeight * ratio,
-      label: formatPrice(value),
-    };
-  });
-
-  const labelStep = Math.max(1, Math.ceil(klineState.candles.length / 6));
-  const xLabels = bars
-    .map((bar, index) => {
-      if (index !== klineState.candles.length - 1 && index % labelStep !== 0) {
-        return null;
-      }
-      return {
-        time: bar.time,
-        x: bar.x,
-        label: formatKlineXAxisTime(bar.time),
-      };
-    })
-    .filter(Boolean);
-
-  return {
-    width,
-    height,
-    padding,
-    bars,
-    gridLines,
-    xLabels,
-  };
-});
 
 const getRangeConfig = () => klineRangeMap[klineState.range] || klineRanges[1];
 
@@ -1318,7 +1206,17 @@ const showErrorMessage = (title, error) => {
 };
 
 const formatKlineXAxisTime = (value) => {
-  const timestamp = typeof value === 'number' ? value : Date.parse(String(value || ''));
+  const normalized = String(value ?? '').trim();
+  let timestamp = typeof value === 'number' ? value : Number.NaN;
+  if (!Number.isFinite(timestamp) && /^\d+$/.test(normalized)) {
+    timestamp = Number(normalized);
+    if (Math.abs(timestamp) < 1e12) {
+      timestamp *= 1000;
+    }
+  }
+  if (!Number.isFinite(timestamp)) {
+    timestamp = Date.parse(normalized);
+  }
   if (!Number.isFinite(timestamp)) {
     return '-';
   }
@@ -1338,6 +1236,214 @@ const formatPrice = (value) => {
 
 const formatThreshold = (value) => formatPrice(value);
 
+let klineChart = null;
+let klineResizeObserver = null;
+
+const disposeKlineChart = () => {
+  if (!klineChart) {
+    return;
+  }
+  klineChart.dispose();
+  klineChart = null;
+};
+
+const resizeKlineChart = () => {
+  if (!klineChart) {
+    return;
+  }
+  klineChart.resize();
+};
+
+const ensureKlineChart = () => {
+  const target = klineChartRef.value;
+  if (!target) {
+    return null;
+  }
+  if (klineChart && klineChart.getDom() !== target) {
+    disposeKlineChart();
+  }
+  if (!klineChart) {
+    klineChart = echarts.init(target);
+  }
+  return klineChart;
+};
+
+const getKlineChartOption = () => {
+  const candles = klineState.candles;
+  const latest = candles[candles.length - 1];
+  const categoryData = candles.map((item) => item.time);
+  const candlestickData = candles.map((item) => [item.open, item.close, item.low, item.high]);
+  const closeLineData = candles.map((item) => item.close);
+  const axisLabelInterval =
+    candles.length <= 8 ? 0 : Math.max(0, Math.ceil(candles.length / (isPhoneViewport.value ? 4 : 7)) - 1);
+  const zoomStart = candles.length > 24 ? Math.max(0, Math.round(((candles.length - 24) / candles.length) * 100)) : 0;
+
+  return {
+    animationDuration: 380,
+    animationDurationUpdate: 220,
+    grid: isPhoneViewport.value
+      ? { left: 54, right: 16, top: 28, bottom: 70 }
+      : { left: 66, right: 24, top: 28, bottom: 74 },
+    tooltip: {
+      trigger: 'axis',
+      axisPointer: {
+        type: 'cross',
+        label: {
+          backgroundColor: '#243249',
+        },
+      },
+      backgroundColor: 'rgba(9, 15, 28, 0.94)',
+      borderColor: '#334155',
+      textStyle: {
+        color: '#e2e8f0',
+      },
+      formatter: (params) => {
+        const seriesParams = Array.isArray(params) ? params : [params];
+        const candleParam = seriesParams.find((item) => item.seriesType === 'candlestick') || seriesParams[0];
+        if (!candleParam || !Array.isArray(candleParam.data)) {
+          return '';
+        }
+        const [open, close, low, high] = candleParam.data;
+        const change = open === 0 ? 0 : ((close - open) / open) * 100;
+        return [
+          `<div>${formatDateTimeValue(candleParam.axisValue)}</div>`,
+          `<div>开盘：${formatPrice(open)}</div>`,
+          `<div>收盘：${formatPrice(close)}</div>`,
+          `<div>最高：${formatPrice(high)}</div>`,
+          `<div>最低：${formatPrice(low)}</div>`,
+          `<div>涨跌：${change >= 0 ? '+' : ''}${change.toFixed(2)}%</div>`,
+        ].join('');
+      },
+    },
+    xAxis: {
+      type: 'category',
+      data: categoryData,
+      boundaryGap: true,
+      axisLine: {
+        lineStyle: {
+          color: '#475569',
+        },
+      },
+      axisTick: {
+        show: false,
+      },
+      axisLabel: {
+        color: '#94a3b8',
+        interval: axisLabelInterval,
+        formatter: (value) => formatKlineXAxisTime(value),
+      },
+      splitLine: {
+        show: false,
+      },
+    },
+    yAxis: {
+      scale: true,
+      splitNumber: 5,
+      axisLine: {
+        show: false,
+      },
+      axisTick: {
+        show: false,
+      },
+      axisLabel: {
+        color: '#94a3b8',
+        formatter: (value) => formatPrice(value),
+      },
+      splitLine: {
+        lineStyle: {
+          color: 'rgba(71, 85, 105, 0.35)',
+        },
+      },
+    },
+    dataZoom: [
+      {
+        type: 'inside',
+        zoomLock: candles.length <= 12,
+        moveOnMouseMove: true,
+      },
+      {
+        type: 'slider',
+        height: 22,
+        bottom: 16,
+        borderColor: 'rgba(71, 85, 105, 0.5)',
+        backgroundColor: 'rgba(15, 23, 42, 0.9)',
+        fillerColor: 'rgba(212, 175, 55, 0.18)',
+        handleStyle: {
+          color: '#d4af37',
+          borderColor: '#f8d568',
+        },
+        textStyle: {
+          color: '#94a3b8',
+        },
+        labelFormatter: (value) => formatKlineXAxisTime(value),
+        start: zoomStart,
+        end: 100,
+      },
+    ],
+    series: [
+      {
+        name: 'K线',
+        type: 'candlestick',
+        data: candlestickData,
+        barMaxWidth: isPhoneViewport.value ? 14 : 18,
+        itemStyle: {
+          color: '#22c55e',
+          color0: '#ef4444',
+          borderColor: '#22c55e',
+          borderColor0: '#ef4444',
+        },
+        markLine: latest
+          ? {
+              symbol: ['none', 'none'],
+              lineStyle: {
+                color: '#f8d568',
+                type: 'dashed',
+                width: 1,
+                opacity: 0.8,
+              },
+              label: {
+                color: '#f8fafc',
+                backgroundColor: 'rgba(30, 41, 59, 0.95)',
+                padding: [4, 6],
+                borderRadius: 4,
+                formatter: ({ value }) => `最新 ${formatPrice(value)}`,
+              },
+              data: [{ yAxis: latest.close }],
+            }
+          : undefined,
+      },
+      {
+        name: '收盘趋势',
+        type: 'line',
+        data: closeLineData,
+        symbol: 'none',
+        smooth: 0.18,
+        lineStyle: {
+          color: 'rgba(250, 204, 21, 0.55)',
+          width: 1,
+        },
+        emphasis: {
+          disabled: true,
+        },
+        silent: true,
+      },
+    ],
+  };
+};
+
+const renderKlineChart = () => {
+  if (!klineState.candles.length) {
+    disposeKlineChart();
+    return;
+  }
+  const chart = ensureKlineChart();
+  if (!chart) {
+    return;
+  }
+  chart.setOption(getKlineChartOption(), { notMerge: true });
+  resizeKlineChart();
+};
+
 const updateViewportFlag = () => {
   if (typeof window === 'undefined') {
     return;
@@ -1345,9 +1451,29 @@ const updateViewportFlag = () => {
   isPhoneViewport.value = window.innerWidth <= 430;
 };
 
+const initKlineResizeObserver = () => {
+  if (typeof ResizeObserver === 'undefined' || !chartWrapperRef.value) {
+    return;
+  }
+  klineResizeObserver = new ResizeObserver(() => {
+    resizeKlineChart();
+  });
+  klineResizeObserver.observe(chartWrapperRef.value);
+};
+
+watch(
+  [() => klineState.candles, () => isPhoneViewport.value],
+  async () => {
+    await nextTick();
+    renderKlineChart();
+  },
+  { flush: 'post' },
+);
+
 onMounted(() => {
   updateViewportFlag();
   window.addEventListener('resize', updateViewportFlag);
+  initKlineResizeObserver();
   Promise.allSettled([
     handleFetchPrice({ silent: true }),
     handleFetchKline({ silent: true }),
@@ -1363,6 +1489,11 @@ onBeforeUnmount(() => {
     return;
   }
   window.removeEventListener('resize', updateViewportFlag);
+  if (klineResizeObserver) {
+    klineResizeObserver.disconnect();
+    klineResizeObserver = null;
+  }
+  disposeKlineChart();
 });
 </script>
 

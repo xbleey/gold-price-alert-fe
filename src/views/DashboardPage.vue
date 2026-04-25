@@ -104,8 +104,8 @@
                     >
                       <div class="ai-chat-bubble">
                         <div class="ai-chat-role">{{ formatAiChatRole(message.role) }}</div>
-                        <div class="ai-chat-content">
-                          {{ message.content }}
+                        <div class="ai-chat-content" v-html="renderAiChatMarkdown(message.content)" />
+                        <div v-if="message.streaming" class="ai-chat-streaming-line">
                           <span v-if="message.streaming" class="ai-chat-cursor" />
                         </div>
                         <div class="ai-chat-message-time">{{ formatDateTimeValue(message.createdAt) }}</div>
@@ -474,6 +474,7 @@ import { CandlestickChart, LineChart } from 'echarts/charts';
 import { DataZoomComponent, GridComponent, MarkLineComponent, TooltipComponent } from 'echarts/components';
 import { CanvasRenderer } from 'echarts/renderers';
 import { ElMessage, ElMessageBox } from 'element-plus';
+import MarkdownIt from 'markdown-it';
 import { isAuthErrorNotified } from '../api/client';
 import { formatDateTimeValue } from '../utils/dateTime';
 import {
@@ -508,6 +509,33 @@ echarts.use([
   TooltipComponent,
   CanvasRenderer,
 ]);
+
+const markdownRenderer = new MarkdownIt({
+  html: false,
+  linkify: true,
+  breaks: true,
+});
+
+const defaultLinkOpenRenderer =
+  markdownRenderer.renderer.rules.link_open ||
+  ((tokens, idx, options, env, self) => self.renderToken(tokens, idx, options));
+
+markdownRenderer.renderer.rules.link_open = (tokens, idx, options, env, self) => {
+  const token = tokens[idx];
+  const targetIndex = token.attrIndex('target');
+  if (targetIndex < 0) {
+    token.attrPush(['target', '_blank']);
+  } else {
+    token.attrs[targetIndex][1] = '_blank';
+  }
+  const relIndex = token.attrIndex('rel');
+  if (relIndex < 0) {
+    token.attrPush(['rel', 'noopener noreferrer']);
+  } else {
+    token.attrs[relIndex][1] = 'noopener noreferrer';
+  }
+  return defaultLinkOpenRenderer(tokens, idx, options, env, self);
+};
 
 const activeTab = ref('ai-chat');
 const tabOrder = ['ai-chat', 'price', 'threshold', 'alerts', 'alert-level-config', 'recipients', 'test-email'];
@@ -1071,6 +1099,8 @@ const formatAiChatRole = (role) => {
   }
   return 'AI';
 };
+
+const renderAiChatMarkdown = (content) => markdownRenderer.render(String(content || ''));
 
 const handleAiChatStreamEvent = (event, assistantMessage, userText) => {
   const data = event?.data && typeof event.data === 'object' ? event.data : {};

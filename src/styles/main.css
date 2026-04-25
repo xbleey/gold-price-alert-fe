@@ -426,8 +426,141 @@ body {
 .ai-chat-content {
   font-size: 14px;
   line-height: 1.65;
-  white-space: pre-wrap;
+  white-space: normal;
   overflow-wrap: anywhere;
+}
+
+.ai-chat-content > :first-child {
+  margin-top: 0;
+}
+
+.ai-chat-content > :last-child {
+  margin-bottom: 0;
+}
+
+.ai-chat-content p {
+  margin: 0 0 10px;
+}
+
+.ai-chat-content h1,
+.ai-chat-content h2,
+.ai-chat-content h3,
+.ai-chat-content h4 {
+  margin: 14px 0 8px;
+  color: #0f172a;
+  line-height: 1.35;
+}
+
+.ai-chat-content h1 {
+  font-size: 20px;
+}
+
+.ai-chat-content h2 {
+  font-size: 18px;
+}
+
+.ai-chat-content h3 {
+  font-size: 16px;
+}
+
+.ai-chat-content h4 {
+  font-size: 15px;
+}
+
+.ai-chat-content ul,
+.ai-chat-content ol {
+  margin: 0 0 10px;
+  padding-left: 22px;
+}
+
+.ai-chat-content li {
+  margin: 4px 0;
+}
+
+.ai-chat-content blockquote {
+  margin: 10px 0;
+  padding: 8px 12px;
+  border-left: 3px solid #d4af37;
+  background: #fff7df;
+  color: #475569;
+}
+
+.ai-chat-content pre {
+  margin: 10px 0;
+  padding: 12px;
+  border-radius: 8px;
+  background: #0f172a;
+  color: #e2e8f0;
+  overflow-x: auto;
+  white-space: pre;
+}
+
+.ai-chat-content code {
+  padding: 2px 5px;
+  border-radius: 4px;
+  background: #eef2f7;
+  color: #b45309;
+  font-family: Consolas, "Liberation Mono", Menlo, monospace;
+  font-size: 0.92em;
+}
+
+.ai-chat-content pre code {
+  padding: 0;
+  background: transparent;
+  color: inherit;
+  font-size: 13px;
+}
+
+.ai-chat-content table {
+  width: 100%;
+  margin: 10px 0;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.ai-chat-content th,
+.ai-chat-content td {
+  padding: 8px 10px;
+  border: 1px solid #e5e7eb;
+  text-align: left;
+  vertical-align: top;
+}
+
+.ai-chat-content th {
+  background: #f1f5f9;
+  font-weight: 700;
+}
+
+.ai-chat-content a {
+  color: #2563eb;
+  text-decoration: none;
+}
+
+.ai-chat-content a:hover {
+  text-decoration: underline;
+}
+
+.ai-chat-message.is-user .ai-chat-content h1,
+.ai-chat-message.is-user .ai-chat-content h2,
+.ai-chat-message.is-user .ai-chat-content h3,
+.ai-chat-message.is-user .ai-chat-content h4,
+.ai-chat-message.is-user .ai-chat-content a {
+  color: #ffffff;
+}
+
+.ai-chat-message.is-user .ai-chat-content code {
+  background: rgba(255, 255, 255, 0.18);
+  color: #fff7ed;
+}
+
+.ai-chat-message.is-user .ai-chat-content blockquote {
+  border-left-color: rgba(255, 255, 255, 0.7);
+  background: rgba(255, 255, 255, 0.12);
+  color: rgba(255, 255, 255, 0.88);
+}
+
+.ai-chat-streaming-line {
+  min-height: 18px;
 }
 
 .ai-chat-message-time {

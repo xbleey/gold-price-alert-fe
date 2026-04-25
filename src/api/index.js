@@ -242,25 +242,53 @@ export const streamAiChat = async ({ sessionId, message, signal, onEvent } = {})
   const decoder = new TextDecoder('utf-8');
   let buffer = '';
   let lastEvent = null;
+  let completedByDoneEvent = false;
 
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) {
-      break;
-    }
-    buffer += decoder.decode(value, { stream: true });
+  const handleChunk = async (chunkText) => {
+    buffer += chunkText;
     const normalized = buffer.replace(/\r\n/g, '\n');
     const chunks = normalized.split('\n\n');
     buffer = chunks.pop() || '';
-    chunks.forEach((chunk) => {
-      if (chunk.trim()) {
-        lastEvent = emitSseEvent(chunk, onEvent);
+
+    for (const chunk of chunks) {
+      if (!chunk.trim()) {
+        continue;
       }
-    });
+      lastEvent = emitSseEvent(chunk, onEvent);
+      if (lastEvent.event === 'done') {
+        completedByDoneEvent = true;
+        await reader.cancel().catch(() => {});
+        return true;
+      }
+    }
+    return false;
+  };
+
+  while (!completedByDoneEvent) {
+    let readResult;
+    try {
+      readResult = await reader.read();
+    } catch (error) {
+      if (completedByDoneEvent) {
+        break;
+      }
+      throw error;
+    }
+
+    const { done, value } = readResult;
+    if (done) {
+      break;
+    }
+    if (await handleChunk(decoder.decode(value, { stream: true }))) {
+      return lastEvent;
+    }
   }
 
-  buffer += decoder.decode();
-  if (buffer.trim()) {
+  const remaining = decoder.decode();
+  if (remaining && await handleChunk(remaining)) {
+    return lastEvent;
+  }
+  if (!completedByDoneEvent && buffer.trim()) {
     lastEvent = emitSseEvent(buffer, onEvent);
   }
   return lastEvent;

@@ -48,6 +48,100 @@
         @touchcancel="resetTabTouchState"
       >
         <el-tabs v-model="activeTab" type="border-card">
+          <el-tab-pane label="智能对话" name="ai-chat">
+            <el-card class="section-card ai-chat-card">
+              <div class="ai-chat-layout">
+                <aside class="ai-chat-sidebar">
+                  <div class="ai-chat-sidebar-head">
+                    <p class="section-title">对话列表</p>
+                    <el-button size="small" type="primary" plain :disabled="aiChatState.sending" @click="handleCreateAiChatSession">
+                      新对话
+                    </el-button>
+                  </div>
+                  <div v-loading="aiChatState.sessionsLoading" class="ai-chat-session-list">
+                    <el-empty
+                      v-if="!aiChatState.sessions.length"
+                      description="暂无历史对话"
+                      :image-size="72"
+                    />
+                    <button
+                      v-for="session in aiChatState.sessions"
+                      :key="session.sessionId"
+                      type="button"
+                      class="ai-chat-session-item"
+                      :class="{ 'is-active': session.sessionId === aiChatState.activeSessionId }"
+                      :disabled="aiChatState.sending"
+                      @click="handleSelectAiChatSession(session.sessionId)"
+                    >
+                      <span class="ai-chat-session-title">{{ session.title || '未命名对话' }}</span>
+                      <span class="ai-chat-session-time">{{ formatDateTimeValue(session.updatedAt) }}</span>
+                    </button>
+                  </div>
+                </aside>
+
+                <section class="ai-chat-panel">
+                  <div class="ai-chat-panel-head">
+                    <p class="section-title">智能对话</p>
+                    <el-button
+                      size="small"
+                      :loading="aiChatState.sessionsLoading"
+                      @click="handleFetchAiChatSessions"
+                    >
+                      刷新对话
+                    </el-button>
+                  </div>
+                  <div ref="aiChatMessagesRef" v-loading="aiChatState.messagesLoading" class="ai-chat-messages">
+                    <el-empty
+                      v-if="!aiChatState.messages.length"
+                      description="选择对话或直接输入问题"
+                      :image-size="90"
+                    />
+                    <div
+                      v-for="message in aiChatState.messages"
+                      :key="message.id"
+                      class="ai-chat-message"
+                      :class="`is-${message.role}`"
+                    >
+                      <div class="ai-chat-bubble">
+                        <div class="ai-chat-role">{{ formatAiChatRole(message.role) }}</div>
+                        <div class="ai-chat-content">
+                          {{ message.content }}
+                          <span v-if="message.streaming" class="ai-chat-cursor" />
+                        </div>
+                        <div class="ai-chat-message-time">{{ formatDateTimeValue(message.createdAt) }}</div>
+                      </div>
+                    </div>
+                  </div>
+                  <div class="ai-chat-composer">
+                    <el-input
+                      v-model="aiChatState.input"
+                      type="textarea"
+                      maxlength="2000"
+                      show-word-limit
+                      :autosize="{ minRows: 2, maxRows: 5 }"
+                      :disabled="aiChatState.sending"
+                      placeholder="输入要咨询的黄金行情问题"
+                      @keydown="handleAiChatKeydown"
+                    />
+                    <div class="ai-chat-actions">
+                      <el-button v-if="aiChatState.sending" @click="handleStopAiChat">
+                        停止
+                      </el-button>
+                      <el-button
+                        type="primary"
+                        :loading="aiChatState.sending"
+                        :disabled="!canSendAiChat"
+                        @click="handleSendAiChat"
+                      >
+                        发送
+                      </el-button>
+                    </div>
+                  </div>
+                </section>
+              </div>
+            </el-card>
+          </el-tab-pane>
+
           <el-tab-pane label="价格快照" name="price">
           <el-card class="section-card">
             <p class="section-title">最新价格抓取</p>
@@ -374,7 +468,7 @@
 </template>
 
 <script setup>
-import { nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
 import * as echarts from 'echarts/core';
 import { CandlestickChart, LineChart } from 'echarts/charts';
 import { DataZoomComponent, GridComponent, MarkLineComponent, TooltipComponent } from 'echarts/components';
@@ -388,6 +482,8 @@ import {
   createMailRecipient,
   deleteAlertLevel,
   deleteMailRecipient,
+  fetchAiChatMessages,
+  fetchAiChatSessions,
   fetchAlertLevels,
   fetchAlertList,
   fetchHistory,
@@ -398,6 +494,7 @@ import {
   getThreshold,
   sendTestEmail,
   setThreshold,
+  streamAiChat,
   updateAlertLevel,
   updateMailRecipient,
 } from '../api';
@@ -412,8 +509,8 @@ echarts.use([
   CanvasRenderer,
 ]);
 
-const activeTab = ref('price');
-const tabOrder = ['price', 'threshold', 'alerts', 'alert-level-config', 'recipients', 'test-email'];
+const activeTab = ref('ai-chat');
+const tabOrder = ['ai-chat', 'price', 'threshold', 'alerts', 'alert-level-config', 'recipients', 'test-email'];
 const MOBILE_TAB_SWIPE_MIN_DISTANCE = 56;
 const MOBILE_TAB_MAX_VERTICAL_DRIFT = 40;
 const MOBILE_TAB_HORIZONTAL_RATIO = 1.2;
@@ -447,6 +544,22 @@ const priceState = reactive({
   loading: false,
   result: null,
 });
+
+const aiChatMessagesRef = ref();
+const aiChatState = reactive({
+  sessionsLoading: false,
+  messagesLoading: false,
+  sending: false,
+  activeSessionId: '',
+  sessions: [],
+  messages: [],
+  total: 0,
+  input: '',
+});
+
+const canSendAiChat = computed(
+  () => !aiChatState.sending && String(aiChatState.input || '').trim().length > 0,
+);
 
 const thresholdState = reactive({
   loading: false,
@@ -624,7 +737,7 @@ const shouldBlockTabSwipe = (target) => {
   }
   return Boolean(
     target.closest(
-      'input, textarea, select, button, a, .el-input, .el-input-number, .el-select, .el-switch, .el-slider, .el-radio-group, .el-checkbox-group, .el-pagination, .el-table, .el-dialog',
+      'input, textarea, select, button, a, .ai-chat-card, .el-input, .el-input-number, .el-select, .el-switch, .el-slider, .el-radio-group, .el-checkbox-group, .el-pagination, .el-table, .el-dialog',
     ),
   );
 };
@@ -818,6 +931,230 @@ const handleFetchKline = async ({ silent = false } = {}) => {
 const handleRangeChange = () => {
   applyKlineWindow();
   void handleFetchKline({ silent: true });
+};
+
+let aiChatAbortController = null;
+
+const createLocalAiChatMessage = (role, content, extra = {}) => ({
+  id: extra.id || `${role}-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+  role,
+  content,
+  createdAt: extra.createdAt || new Date().toISOString(),
+  streaming: Boolean(extra.streaming),
+  model: extra.model,
+  finishReason: extra.finishReason,
+  usage: extra.usage,
+});
+
+const normalizeAiChatSessions = (records) =>
+  (records || [])
+    .map((item) => ({
+      sessionId: String(item.sessionId || '').trim(),
+      title: String(item.title || '').trim(),
+      createdAt: item.createdAt,
+      updatedAt: item.updatedAt,
+    }))
+    .filter((item) => item.sessionId);
+
+const normalizeAiChatMessages = (records) =>
+  (records || [])
+    .map((item) => createLocalAiChatMessage(
+      String(item.role || '').trim().toLowerCase() || 'assistant',
+      String(item.content || ''),
+      {
+        id: item.id || `${item.role || 'message'}-${item.createdAt || Date.now()}`,
+        createdAt: item.createdAt,
+        model: item.model,
+        finishReason: item.finishReason,
+        usage: {
+          promptTokens: item.promptTokens,
+          completionTokens: item.completionTokens,
+          totalTokens: item.totalTokens,
+        },
+      },
+    ));
+
+const scrollAiChatToBottom = async () => {
+  await nextTick();
+  const target = aiChatMessagesRef.value;
+  if (!target) {
+    return;
+  }
+  target.scrollTop = target.scrollHeight;
+};
+
+const upsertAiChatSession = (session) => {
+  const sessionId = String(session?.sessionId || '').trim();
+  if (!sessionId) {
+    return;
+  }
+  const nextSession = {
+    sessionId,
+    title: String(session?.title || '').trim() || '新对话',
+    createdAt: session?.createdAt || new Date().toISOString(),
+    updatedAt: session?.updatedAt || new Date().toISOString(),
+  };
+  const currentIndex = aiChatState.sessions.findIndex((item) => item.sessionId === sessionId);
+  if (currentIndex >= 0) {
+    aiChatState.sessions.splice(currentIndex, 1);
+  }
+  aiChatState.sessions.unshift(nextSession);
+};
+
+const handleFetchAiChatSessions = async ({ silent = false, selectFirst = false } = {}) => {
+  aiChatState.sessionsLoading = true;
+  try {
+    const { data } = await fetchAiChatSessions({ pageNum: 1, pageSize: 50 });
+    aiChatState.sessions = normalizeAiChatSessions(data.records);
+    aiChatState.total = Number(data.total || aiChatState.sessions.length || 0);
+
+    const activeStillExists = aiChatState.sessions.some((item) => item.sessionId === aiChatState.activeSessionId);
+    if (!activeStillExists && aiChatState.activeSessionId) {
+      aiChatState.activeSessionId = '';
+      aiChatState.messages = [];
+    }
+    if (selectFirst && !aiChatState.activeSessionId && aiChatState.sessions.length) {
+      await handleSelectAiChatSession(aiChatState.sessions[0].sessionId);
+    }
+  } catch (error) {
+    if (!silent) {
+      showErrorMessage('读取对话失败', error);
+    }
+  } finally {
+    aiChatState.sessionsLoading = false;
+  }
+};
+
+const handleFetchAiChatMessages = async (sessionId, { silent = false } = {}) => {
+  const normalizedSessionId = String(sessionId || '').trim();
+  if (!normalizedSessionId) {
+    aiChatState.messages = [];
+    return;
+  }
+
+  aiChatState.messagesLoading = true;
+  try {
+    const { data } = await fetchAiChatMessages(normalizedSessionId, { pageNum: 1, pageSize: 100 });
+    aiChatState.messages = normalizeAiChatMessages(data.records);
+    await scrollAiChatToBottom();
+  } catch (error) {
+    if (!silent) {
+      showErrorMessage('读取消息失败', error);
+    }
+  } finally {
+    aiChatState.messagesLoading = false;
+  }
+};
+
+const handleCreateAiChatSession = () => {
+  if (aiChatState.sending) {
+    return;
+  }
+  aiChatState.activeSessionId = '';
+  aiChatState.messages = [];
+  aiChatState.input = '';
+};
+
+const handleSelectAiChatSession = async (sessionId) => {
+  const normalizedSessionId = String(sessionId || '').trim();
+  if (!normalizedSessionId || normalizedSessionId === aiChatState.activeSessionId || aiChatState.sending) {
+    return;
+  }
+  aiChatState.activeSessionId = normalizedSessionId;
+  await handleFetchAiChatMessages(normalizedSessionId);
+};
+
+const formatAiChatRole = (role) => {
+  const normalized = String(role || '').trim().toLowerCase();
+  if (normalized === 'user') {
+    return '我';
+  }
+  return 'AI';
+};
+
+const handleAiChatStreamEvent = (event, assistantMessage, userText) => {
+  const data = event?.data && typeof event.data === 'object' ? event.data : {};
+  if (event?.event === 'session') {
+    const sessionId = String(data.sessionId || '').trim();
+    if (sessionId) {
+      aiChatState.activeSessionId = sessionId;
+      upsertAiChatSession({
+        sessionId,
+        title: userText.length > 40 ? userText.slice(0, 40) : userText,
+      });
+    }
+    return;
+  }
+  if (event?.event === 'delta') {
+    assistantMessage.content += String(data.content || '');
+    void scrollAiChatToBottom();
+    return;
+  }
+  if (event?.event === 'done') {
+    assistantMessage.content = String(data.message || assistantMessage.content || '');
+    assistantMessage.finishReason = data.finishReason;
+    assistantMessage.usage = data.usage;
+    assistantMessage.streaming = false;
+    void scrollAiChatToBottom();
+  }
+};
+
+const handleSendAiChat = async () => {
+  const userText = String(aiChatState.input || '').trim();
+  if (!userText) {
+    ElMessage.warning('请输入问题');
+    return;
+  }
+  if (aiChatState.sending) {
+    return;
+  }
+
+  const requestSessionId = aiChatState.activeSessionId;
+  const userMessage = createLocalAiChatMessage('user', userText);
+  const assistantMessage = createLocalAiChatMessage('assistant', '', { streaming: true });
+  aiChatState.input = '';
+  aiChatState.messages.push(userMessage, assistantMessage);
+  await scrollAiChatToBottom();
+
+  aiChatState.sending = true;
+  aiChatAbortController = new AbortController();
+  try {
+    await streamAiChat({
+      sessionId: requestSessionId,
+      message: userText,
+      signal: aiChatAbortController.signal,
+      onEvent: (event) => handleAiChatStreamEvent(event, assistantMessage, userText),
+    });
+    if (!assistantMessage.content) {
+      assistantMessage.content = '（无响应内容）';
+    }
+    await handleFetchAiChatSessions({ silent: true });
+  } catch (error) {
+    if (error?.name === 'AbortError') {
+      assistantMessage.content = assistantMessage.content || '（已停止）';
+      ElMessage.info('已停止生成');
+    } else {
+      assistantMessage.content = assistantMessage.content || `请求失败：${resolveError(error)}`;
+      showErrorMessage('对话失败', error);
+    }
+  } finally {
+    assistantMessage.streaming = false;
+    aiChatAbortController = null;
+    aiChatState.sending = false;
+    await scrollAiChatToBottom();
+  }
+};
+
+const handleStopAiChat = () => {
+  aiChatAbortController?.abort();
+};
+
+const handleAiChatKeydown = (event) => {
+  if (event.key !== 'Enter' || event.shiftKey || event.ctrlKey || event.metaKey || event.altKey) {
+    return;
+  }
+  event.preventDefault();
+  void handleSendAiChat();
 };
 
 const handleGetThreshold = async ({ silent = false } = {}) => {
@@ -1475,6 +1812,7 @@ onMounted(() => {
   window.addEventListener('resize', updateViewportFlag);
   initKlineResizeObserver();
   Promise.allSettled([
+    handleFetchAiChatSessions({ silent: true, selectFirst: true }),
     handleFetchPrice({ silent: true }),
     handleFetchKline({ silent: true }),
     handleGetThreshold({ silent: true }),
@@ -1489,6 +1827,7 @@ onBeforeUnmount(() => {
     return;
   }
   window.removeEventListener('resize', updateViewportFlag);
+  aiChatAbortController?.abort();
   if (klineResizeObserver) {
     klineResizeObserver.disconnect();
     klineResizeObserver = null;

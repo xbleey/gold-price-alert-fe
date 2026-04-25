@@ -133,6 +133,139 @@ export const updateAlertLevel = (levelName, payload) => apiClient.put(`/alert/le
 
 export const deleteAlertLevel = (levelName) => apiClient.delete(`/alert/levels/${levelName}`);
 
+export const fetchAiChatSessions = ({ pageNum = 1, pageSize = 50 } = {}) =>
+  apiClient.get('/ai/chat/sessions', {
+    params: {
+      pageNum,
+      pageSize,
+    },
+  });
+
+export const fetchAiChatMessages = (sessionId, { pageNum = 1, pageSize = 100 } = {}) =>
+  apiClient.get(`/ai/chat/sessions/${encodeURIComponent(sessionId)}/messages`, {
+    params: {
+      pageNum,
+      pageSize,
+    },
+  });
+
+export const sendAiChat = ({ sessionId, message, stream = false }) =>
+  apiClient.post('/ai/chat', {
+    sessionId: sessionId || null,
+    message: String(message || ''),
+    stream: Boolean(stream),
+  });
+
+const resolveApiUrl = (path) => {
+  const base = String(apiClient.defaults.baseURL || '').replace(/\/+$/, '');
+  const normalizedPath = String(path || '').startsWith('/') ? String(path || '') : `/${String(path || '')}`;
+  if (/^https?:\/\//i.test(base)) {
+    return `${base}${normalizedPath}`;
+  }
+  return `${base || ''}${normalizedPath}`;
+};
+
+const parseJsonSafely = (value) => {
+  const text = String(value || '').trim();
+  if (!text) {
+    return null;
+  }
+  try {
+    return JSON.parse(text);
+  } catch {
+    return text;
+  }
+};
+
+const createStreamError = (status, payload) => {
+  const error = new Error(payload?.message || payload || 'AI 对话请求失败');
+  error.response = {
+    status,
+    data: payload,
+  };
+  return error;
+};
+
+const emitSseEvent = (rawEvent, onEvent) => {
+  const lines = String(rawEvent || '').split(/\r?\n/);
+  let event = 'message';
+  const dataLines = [];
+
+  lines.forEach((line) => {
+    if (line.startsWith('event:')) {
+      event = line.slice(6).trim() || 'message';
+      return;
+    }
+    if (line.startsWith('data:')) {
+      dataLines.push(line.slice(5).trimStart());
+    }
+  });
+
+  const data = parseJsonSafely(dataLines.join('\n'));
+  onEvent?.({ event, data });
+  if (event === 'error') {
+    throw createStreamError(200, data);
+  }
+  return { event, data };
+};
+
+export const streamAiChat = async ({ sessionId, message, signal, onEvent } = {}) => {
+  const authorization = resolveAuthorization();
+  if (!authorization) {
+    throw createStreamError(401, { status: 'unauthorized', message: 'missing authorization token' });
+  }
+
+  const response = await fetch(resolveApiUrl('/ai/chat'), {
+    method: 'POST',
+    headers: {
+      Authorization: authorization,
+      Accept: 'text/event-stream',
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      sessionId: sessionId || null,
+      message: String(message || ''),
+      stream: true,
+    }),
+    signal,
+  });
+
+  if (!response.ok) {
+    const payload = parseJsonSafely(await response.text());
+    throw createStreamError(response.status, payload);
+  }
+  if (!response.body) {
+    throw createStreamError(response.status, { status: 'stream_error', message: '浏览器不支持流式响应' });
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder('utf-8');
+  let buffer = '';
+  let lastEvent = null;
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) {
+      break;
+    }
+    buffer += decoder.decode(value, { stream: true });
+    const normalized = buffer.replace(/\r\n/g, '\n');
+    const chunks = normalized.split('\n\n');
+    buffer = chunks.pop() || '';
+    chunks.forEach((chunk) => {
+      if (chunk.trim()) {
+        lastEvent = emitSseEvent(chunk, onEvent);
+      }
+    });
+  }
+
+  buffer += decoder.decode();
+  if (buffer.trim()) {
+    lastEvent = emitSseEvent(buffer, onEvent);
+  }
+  return lastEvent;
+};
+
 export const fetchUsers = () => apiClient.get('/users');
 
 export const getUser = (id) => apiClient.get(`/users/${id}`);

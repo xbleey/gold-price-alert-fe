@@ -547,6 +547,7 @@ const defaultAlertLevels = ['MAJOR_LEVEL', 'CRITICAL_LEVEL'];
 const NON_NEGATIVE_NUMBER_PATTERN = /^(?:\d+\.?\d*|\.\d+)$/;
 const ALERT_LEVEL_NAME_PATTERN = /^P[1-9]\d*$/i;
 const ALERT_LEVEL_THRESHOLD_PATTERN = /^(?:10\.00|[0-9]\.\d{2})$/;
+const AI_CHAT_TYPE_INTERVAL_MS = 24;
 
 const klineRanges = [
   { label: '最近6小时', value: '6h', minutes: 360, bucketMinutes: 15, length: 2000 },
@@ -962,6 +963,7 @@ const handleRangeChange = () => {
 };
 
 let aiChatAbortController = null;
+const aiChatTypewriterStates = new Map();
 
 const createLocalAiChatMessage = (role, content, extra = {}) => ({
   id: extra.id || `${role}-${Date.now()}-${Math.random().toString(36).slice(2)}`,
@@ -972,7 +974,99 @@ const createLocalAiChatMessage = (role, content, extra = {}) => ({
   model: extra.model,
   finishReason: extra.finishReason,
   usage: extra.usage,
+  finalContent: extra.finalContent || '',
 });
+
+const resolveAiChatTypewriterState = (message) => {
+  const id = message?.id;
+  if (!id) {
+    return null;
+  }
+  let state = aiChatTypewriterStates.get(id);
+  if (!state) {
+    state = {
+      buffer: [],
+      timer: null,
+      resolvers: [],
+    };
+    aiChatTypewriterStates.set(id, state);
+  }
+  return state;
+};
+
+const resolveAiChatTypewriterWaiters = (message, state) => {
+  const resolvers = state.resolvers.splice(0);
+  resolvers.forEach((resolve) => resolve());
+  aiChatTypewriterStates.delete(message.id);
+};
+
+const scheduleAiChatTypewriter = (message, state) => {
+  if (!message?.id || state.timer || !state.buffer.length) {
+    return;
+  }
+  state.timer = window.setTimeout(() => {
+    state.timer = null;
+    const nextText = state.buffer.shift();
+    if (nextText) {
+      message.content += nextText;
+      void scrollAiChatToBottom();
+    }
+    if (state.buffer.length) {
+      scheduleAiChatTypewriter(message, state);
+      return;
+    }
+    resolveAiChatTypewriterWaiters(message, state);
+  }, AI_CHAT_TYPE_INTERVAL_MS);
+};
+
+const queueAiChatTypewriterText = (message, text) => {
+  const chars = Array.from(String(text || ''));
+  if (!chars.length) {
+    return;
+  }
+  const state = resolveAiChatTypewriterState(message);
+  if (!state) {
+    return;
+  }
+  state.buffer.push(...chars);
+  scheduleAiChatTypewriter(message, state);
+};
+
+const waitForAiChatTypewriter = (message) => {
+  const state = message?.id ? aiChatTypewriterStates.get(message.id) : null;
+  if (!state || (!state.timer && !state.buffer.length)) {
+    return Promise.resolve();
+  }
+  return new Promise((resolve) => {
+    state.resolvers.push(resolve);
+  });
+};
+
+const clearAiChatTypewriter = (message, { flush = false } = {}) => {
+  const state = message?.id ? aiChatTypewriterStates.get(message.id) : null;
+  if (!state) {
+    return;
+  }
+  if (state.timer) {
+    window.clearTimeout(state.timer);
+    state.timer = null;
+  }
+  if (flush && state.buffer.length) {
+    message.content += state.buffer.join('');
+  }
+  state.buffer = [];
+  resolveAiChatTypewriterWaiters(message, state);
+};
+
+const clearAllAiChatTypewriters = () => {
+  aiChatTypewriterStates.forEach((state) => {
+    if (state.timer) {
+      window.clearTimeout(state.timer);
+    }
+    state.resolvers.splice(0).forEach((resolve) => resolve());
+  });
+  aiChatTypewriterStates.clear();
+};
 
 const normalizeAiChatSessions = (records) =>
   (records || [])
@@ -1116,16 +1210,13 @@ const handleAiChatStreamEvent = (event, assistantMessage, userText) => {
     return;
   }
   if (event?.event === 'delta') {
-    assistantMessage.content += String(data.content || '');
-    void scrollAiChatToBottom();
+    queueAiChatTypewriterText(assistantMessage, data.content);
     return;
   }
   if (event?.event === 'done') {
-    assistantMessage.content = String(data.message || assistantMessage.content || '');
+    assistantMessage.finalContent = String(data.message || '');
     assistantMessage.finishReason = data.finishReason;
     assistantMessage.usage = data.usage;
-    assistantMessage.streaming = false;
-    void scrollAiChatToBottom();
   }
 };
 
@@ -1155,19 +1246,26 @@ const handleSendAiChat = async () => {
       signal: aiChatAbortController.signal,
       onEvent: (event) => handleAiChatStreamEvent(event, assistantMessage, userText),
     });
+    await waitForAiChatTypewriter(assistantMessage);
+    if (assistantMessage.finalContent && assistantMessage.content !== assistantMessage.finalContent) {
+      assistantMessage.content = assistantMessage.finalContent;
+    }
     if (!assistantMessage.content) {
       assistantMessage.content = '（无响应内容）';
     }
     await handleFetchAiChatSessions({ silent: true });
   } catch (error) {
     if (error?.name === 'AbortError') {
+      clearAiChatTypewriter(assistantMessage);
       assistantMessage.content = assistantMessage.content || '（已停止）';
       ElMessage.info('已停止生成');
     } else {
+      clearAiChatTypewriter(assistantMessage, { flush: true });
       assistantMessage.content = assistantMessage.content || `请求失败：${resolveError(error)}`;
       showErrorMessage('对话失败', error);
     }
   } finally {
+    clearAiChatTypewriter(assistantMessage, { flush: true });
     assistantMessage.streaming = false;
     aiChatAbortController = null;
     aiChatState.sending = false;
@@ -1858,6 +1956,7 @@ onBeforeUnmount(() => {
   }
   window.removeEventListener('resize', updateViewportFlag);
   aiChatAbortController?.abort();
+  clearAllAiChatTypewriters();
   if (klineResizeObserver) {
     klineResizeObserver.disconnect();
     klineResizeObserver = null;
